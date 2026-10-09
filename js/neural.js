@@ -5,7 +5,7 @@
 // Les audios générés sont mis en cache (IndexedDB) : réécouter un chapitre ne coûte rien.
 
 import { getAudio, saveAudio } from './db.js';
-import { getSettings } from './settings.js';
+import { getSettings, setSettings } from './settings.js';
 import { MOOD_DIRECTION } from './mood.js';
 
 export const OPENAI_VOICES = [
@@ -16,10 +16,15 @@ export const OPENAI_VOICES = [
 ];
 export const OPENAI_MODELS = [['gpt-4o-mini-tts', 'gpt-4o-mini-tts (émotions guidées)'], ['tts-1-hd', 'tts-1-hd'], ['tts-1', 'tts-1 (économique)']];
 export const ELEVEN_MODELS = [['eleven_multilingual_v2', 'Multilingual v2 (stable)'], ['eleven_v3', 'v3 (le plus expressif)'], ['eleven_flash_v2_5', 'Flash v2.5 (rapide, économique)']];
+// Voix « par défaut » d'ElevenLabs, utilisables avec l'offre gratuite via l'API
 export const ELEVEN_DEFAULT_VOICES = [
-  ['21m00Tcm4TlvDq8ikWAM', 'Rachel'], ['EXAVITQu4vr4xnSDxMaL', 'Sarah'], ['XB0fDUnXU5powFXDhCwa', 'Charlotte'],
-  ['pNInz6obpgDQGcFmaJgB', 'Adam'], ['onwK4e9ZLuTAKqWW03F9', 'Daniel'], ['JBFqnCBsd6RMkjVDRZzb', 'George'],
+  ['JBFqnCBsd6RMkjVDRZzb', 'George (narrateur chaleureux)'], ['XB0fDUnXU5powFXDhCwa', 'Charlotte'], ['onwK4e9ZLuTAKqWW03F9', 'Daniel'],
+  ['EXAVITQu4vr4xnSDxMaL', 'Sarah'], ['Xb7hH8MSUJpSbSDYk0k2', 'Alice'], ['FGY2WhTYpPnrIDTdsKH5', 'Laura'],
+  ['N2lVS1w4EtoT3dr4eOWO', 'Callum'], ['nPczCjzI2devNBz1zQrb', 'Brian'],
 ];
+// Anciennes voix devenues réservées aux comptes payants via l'API
+const RETIRED_VOICES = new Set(['21m00Tcm4TlvDq8ikWAM', 'pNInz6obpgDQGcFmaJgB']);
+export const isRetiredVoice = id => RETIRED_VOICES.has(id);
 
 // Indications d'émotion pour ElevenLabs v3 (balises audio)
 const V3_TAGS = {
@@ -55,6 +60,11 @@ async function apiError(res, provider) {
   if (status === 'detected_unusual_activity') {
     const e = new Error(`${provider} : offre gratuite bloquée (activité inhabituelle détectée, souvent à cause d'un VPN).`);
     e.code = 'quota';
+    return e;
+  }
+  if (/library voices/i.test(msg) || status === 'payment_required' && /library/i.test(msg)) {
+    const e = new Error(`${provider} : cette voix est réservée aux comptes payants (voix de la bibliothèque).`);
+    e.code = 'library_voice';
     return e;
   }
   if (status === 'missing_permissions' || /missing the permission/i.test(msg)) {
@@ -135,7 +145,22 @@ export async function listElevenVoices(key) {
   const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': key } });
   if (!res.ok) throw await apiError(res, 'ElevenLabs');
   const data = await res.json();
-  return (data.voices || []).map(v => ({ id: v.voice_id, name: v.name, labels: v.labels || {} }));
+  return (data.voices || []).map(v => ({ id: v.voice_id, name: v.name, labels: v.labels || {}, category: v.category || '' }));
+}
+
+/** Les voix « premade » (par défaut) et celles que tu as créées toi-même marchent en offre gratuite. */
+export const isFreeElevenVoice = v => ['premade', 'cloned', 'generated'].includes(v.category) && !RETIRED_VOICES.has(v.id);
+
+/** Choisit une voix utilisable en offre gratuite (différente de celle qui a échoué). */
+export async function pickFreeElevenVoice(key, failedId) {
+  try {
+    const voices = (await listElevenVoices(key)).filter(v => v.category === 'premade' && v.id !== failedId && !RETIRED_VOICES.has(v.id));
+    const pref = ELEVEN_DEFAULT_VOICES.map(([id]) => id);
+    voices.sort((a, b) => (pref.indexOf(a.id) + 1 || 99) - (pref.indexOf(b.id) + 1 || 99));
+    if (voices[0]) return { id: voices[0].id, name: voices[0].name };
+  } catch { /* clé sans permission de lecture des voix */ }
+  const d = ELEVEN_DEFAULT_VOICES.find(([id]) => id !== failedId);
+  return { id: d[0], name: d[1] };
 }
 
 /** Poids de chaque caractère (les pauses de ponctuation "prennent du temps"). */
@@ -230,7 +255,22 @@ export class AudioSpeaker extends EventTarget {
     let rec = await getAudio(key).catch(() => null);
     if (!rec) {
       const s = getSettings();
-      const r = s.engine === 'elevenlabs' ? await synthEleven(item, s) : await synthOpenAI(item, s);
+      let r;
+      try {
+        r = s.engine === 'elevenlabs' ? await synthEleven(item, s) : await synthOpenAI(item, s);
+      } catch (e) {
+        // Voix payante en offre gratuite : on passe automatiquement sur une voix gratuite
+        if (e.code === 'library_voice' && !this.switchingVoice) {
+          this.switchingVoice = true;
+          const v = await pickFreeElevenVoice(s.elevenKey, s.elevenVoice);
+          this.emit('notice', { message: `Cette voix ElevenLabs est réservée aux comptes payants : je passe sur la voix gratuite « ${v.name} ».` });
+          setTimeout(() => { this.switchingVoice = false; }, 3000);
+          setSettings({ elevenVoice: v.id }); // relance la lecture avec la nouvelle voix
+          const err = new Error('voix changée'); err.code = 'voice_switched';
+          throw err;
+        }
+        throw e;
+      }
       rec = { blob: r.blob, alignment: r.alignment };
       saveAudio(key, r.blob, r.alignment).catch(() => {});
     }

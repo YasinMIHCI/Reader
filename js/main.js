@@ -7,7 +7,7 @@ import { getSettings, setSettings, resetSettings, onSettingsChange, applyAppeara
 import { Speaker, loadVoices, sortedVoices, pickVoice, voiceLabel, ttsSupported } from './tts.js';
 import { ReaderView, fmtDuration } from './reader.js';
 import { playIntro } from './intro.js';
-import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices, getElevenQuota } from './neural.js';
+import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices, getElevenQuota, isFreeElevenVoice, isRetiredVoice } from './neural.js';
 import { SyncManager, recordDeletion } from './sync.js';
 import { analyzeChapter, MOODS, moodById, MOOD_PROSODY } from './mood.js';
 import { MusicManager } from './music.js';
@@ -692,6 +692,7 @@ on('word', e => {
   reader.setWord(loc.seg, loc.local, e.detail.charLength);
 });
 on('loading', e => $('#btn-play').classList.toggle('loading', !!e.detail));
+on('notice', e => toast(e.detail.message, { duration: 7000 }));
 on('state', () => {
   updatePlayButton();
   music?.onVoiceState(speaker.state === 'playing');
@@ -710,6 +711,7 @@ on('error', e => {
     if (state.chapter) playSeg(Math.max(0, state.currentSeg));
     return;
   }
+  if (e.detail.code === 'voice_switched') return;
   toast(e.detail.message, { type: 'error', duration: 7000 });
 });
 on('end', () => {
@@ -1010,6 +1012,7 @@ const TEXT_KEYS = ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elev
 function elevenVoiceOptions() {
   let custom = [];
   try { custom = JSON.parse(localStorage.getItem('relecteur.elevenVoices') || '[]'); } catch { /* ignore */ }
+  custom = custom.filter(v => !isRetiredVoice(v.id));
   return custom.length ? custom.map(v => [v.id, v.name]) : ELEVEN_DEFAULT_VOICES;
 }
 function fillSelect(sel, options, value) {
@@ -1093,9 +1096,15 @@ function buildSettingsUI() {
     setSettings({ elevenKey: key });
     try {
       const voices = await listElevenVoices(key);
-      localStorage.setItem('relecteur.elevenVoices', JSON.stringify(voices.map(v => ({ id: v.id, name: `${v.name}${v.labels.accent ? ' · ' + v.labels.accent : ''}${v.labels.gender ? ' · ' + v.labels.gender : ''}` }))));
+      // voix gratuites d'abord ; celles de la bibliothèque (payantes via l'API) marquées
+      voices.sort((a, b) => isFreeElevenVoice(b) - isFreeElevenVoice(a) || a.name.localeCompare(b.name));
+      localStorage.setItem('relecteur.elevenVoices', JSON.stringify(voices.map(v => ({
+        id: v.id,
+        name: `${isFreeElevenVoice(v) ? '' : '💎 '}${v.name}${v.labels.accent ? ' · ' + v.labels.accent : ''}${v.labels.gender ? ' · ' + v.labels.gender : ''}${isFreeElevenVoice(v) ? '' : ' (compte payant)'}`,
+      }))));
       fillSelect($('#set-elevenVoice'), elevenVoiceOptions(), getSettings().elevenVoice);
-      toast(`${voices.length} voix chargées.`);
+      const free = voices.filter(isFreeElevenVoice).length;
+      toast(`${voices.length} voix chargées, dont ${free} utilisables gratuitement (les 💎 demandent un compte payant).`, { duration: 6000 });
     } catch (err) { toast(err.message, { type: 'error' }); }
   });
   $('#eleven-quota-btn').addEventListener('click', () => showElevenQuota());
@@ -1173,6 +1182,7 @@ onSettingsChange((s, patch) => {
     || (s.engine !== 'browser' && ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'].some(k => k in patch))) {
     rebuildItems();
   }
+  if ('elevenVoice' in patch) fillSelect($('#set-elevenVoice'), elevenVoiceOptions(), s.elevenVoice);
   if ('musicVolume' in patch) music?.applyVolume();
   if ('musicAuto' in patch && !s.musicAuto) music?.stop();
   if ('scrollAnchor' in patch) reader.anchor = s.scrollAnchor;
