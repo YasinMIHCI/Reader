@@ -57,7 +57,15 @@ async function apiError(res, provider) {
     e.code = 'quota';
     return e;
   }
-  if (res.status === 401) return new Error(`${provider} : clé API invalide ou manquante.`);
+  if (status === 'missing_permissions' || /missing the permission/i.test(msg)) {
+    const perm = (msg.match(/permission\s+([\w_]+)/i) || [])[1] || '';
+    const label = { text_to_speech: 'Text to Speech', voices_read: 'Voices → Read', user_read: 'User → Read' }[perm] || perm;
+    return new Error(`${provider} : ta clé n'a pas la permission « ${label} ». Sur elevenlabs.io → Developers → API Keys, modifie la clé (ou crée-en une nouvelle) et active cette permission.`);
+  }
+  if (status === 'invalid_api_key' || (res.status === 401 && /invalid api key/i.test(msg))) {
+    return new Error(`${provider} : clé API refusée. Vérifie que tu as copié la clé en entier (elle commence par « sk_ ») et qu'elle n'a pas été supprimée.`);
+  }
+  if (res.status === 401) return new Error(`${provider} : accès refusé${msg ? ` — ${msg}` : ' (clé API invalide ou manquante)'}${status ? ` [${status}]` : ''}.`);
   if (res.status === 429) return new Error(`${provider} : quota atteint ou trop de requêtes. ${msg}`.trim());
   if (res.status === 402) return new Error(`${provider} : crédit insuffisant. ${msg}`.trim());
   return new Error(`${provider} : erreur ${res.status}. ${msg}`.trim());

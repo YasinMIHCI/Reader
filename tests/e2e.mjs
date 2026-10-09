@@ -142,6 +142,7 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
   });
   await ctx.route('https://api.elevenlabs.io/**', r => {
     log.push('eleven:' + r.request().url());
+    if (r.request().headers()['xi-api-key'] === 'sk_noperm') return r.fulfill({ status: 401, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'missing_permissions', message: 'The API key you used is missing the permission text_to_speech to execute this operation.' } }) });
     if (r.request().url().includes('/user/subscription')) return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ character_count: 9990, character_limit: 10000, next_character_count_reset_unix: 1893456000 }) });
     return r.fulfill({ status: 401, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } }) });
   });
@@ -462,6 +463,13 @@ const CH2 = 'https://exemple-roman.test/2024/01/02/arc-i-chapitre-2/';
   await page.waitForTimeout(500);
   check((await page.textContent('#eleven-quota')).includes('10 caractères restants'), `crédits affichés : ${(await page.textContent('#eleven-quota')).slice(0, 60)}`);
   await page.screenshot({ path: `${OUT}/11-credits.png` });
+  // Clé collée avec espaces / retour à la ligne, sans permission Text to Speech
+  await page.fill('#set-elevenKey', '  sk_noperm \n');
+  await page.waitForTimeout(900);
+  check(await page.evaluate(() => JSON.parse(localStorage.getItem('relecteur.settings.v1')).elevenKey) === 'sk_noperm', 'clé collée nettoyée et enregistrée automatiquement');
+  await page.click('#voice-test');
+  await page.waitForTimeout(800);
+  check((await page.textContent('#toasts')).includes('permission « Text to Speech »'), 'permission manquante expliquée clairement');
   await ctx.close();
 }
 
