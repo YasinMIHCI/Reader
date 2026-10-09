@@ -14,13 +14,15 @@ Site 100 % statique (HTML/CSS/JS, aucune compilation) : il s'héberge gratuiteme
 | 🔗 **Import par URL** | Colle le lien d'un chapitre. Pour les sites **WordPress.com** (comme la traduction FR de Re:Zero), l'API officielle est utilisée : pas besoin de proxy. Les autres sites passent par des proxys CORS (automatique). |
 | 🧹 **Texte propre** | Seul le texte du roman est gardé : titres, paragraphes, dialogues, séparateurs de scènes. Les menus, pubs, « J'aime », « Partager », « Articles similaires », commentaires, liens de navigation et mots du traducteur sont retirés. |
 | 🖼️ **Images** | Les illustrations du chapitre sont téléchargées et stockées sur l'appareil (elles restent disponibles hors ligne). Clic dessus pour les agrandir. |
-| 🗣️ **Voix naturelle** | Utilise les meilleures voix de l'appareil, triées automatiquement (les voix neuronales « Natural », « Online », « Premium »… sont marquées ★ et choisies par défaut). |
+| 🗣️ **Voix naturelle** | Voix de l'appareil (gratuit) triées automatiquement — les voix neuronales « Natural », « Online », « Premium »… sont marquées ★. **Expressivité** : le ton et le rythme varient selon les dialogues, les questions, les exclamations et l'ambiance de la scène. **Enchaînement fluide** : plusieurs phrases par énoncé pour supprimer les blancs. |
+| 🎭 **Voix IA (option)** | Avec ta propre clé API : **OpenAI** (reçoit des consignes de jeu selon la scène : triste, action, romantique…) ou **ElevenLabs** (ultra-réaliste, synchronisation mot à mot exacte). Le passage suivant est préparé à l'avance (pas de blanc) et les audios sont mis en cache : une réécoute ne coûte rien. |
+| 🎵 **Musiques d'ambiance** | Bibliothèque d'OST à partir de liens YouTube, avec des tags (calme, joyeux, romantique, triste, tension, action, épique, mystère, effrayant). Re:Lecteur **analyse le texte en direct** pour comprendre l'ambiance de la scène et lance la musique qui va avec, en fondu enchaîné. Pause avec la voix, volume réglable, ambiance forçable à la main. |
 | 🎯 **Suivi visuel** | Phrase en cours surlignée, mot en cours surligné, petit marqueur lumineux animé dans la marge qui suit la ligne lue, et défilement automatique fluide. Si tu fais défiler toi-même, un bouton « Suivre la voix » apparaît. Clique sur n'importe quelle phrase pour lire à partir de là. |
 | 📚 **Bibliothèque** | Chaque chapitre ouvert est gardé en mémoire (IndexedDB) avec sa position de lecture : il se rouvre instantanément, **sans aucune nouvelle requête**. Recherche, suppression, export/import (pour passer d'un appareil à l'autre). |
 | ⏭️ **Enchaînement** | Détection des liens « précédent / sommaire / suivant ». Le chapitre suivant est préchargé pendant l'écoute et lancé automatiquement à la fin. Les pages de sommaire sont détectées et affichées sous forme de liste. |
 | 🎨 **Apparence** | 6 thèmes (Sorcière, Givre, Manoir, Clair, Sépia, Nuit OLED), 10 polices, taille, interligne, largeur, espacement, justification, alinéa, mode concentration. |
 | 🌙 **Confort** | Minuterie de sommeil (10 min → fin du chapitre), vitesse de 0,5× à 2,5×, écran maintenu allumé pendant la lecture, contrôles depuis l'écran verrouillé / le casque. |
-| 🎬 **Intro animée** | Une animation de 5 secondes au lancement (horloge qui remonte le temps, ombres, éclats, givre, cercle magique) — désactivable dans Réglages → Avancé. Dessinée entièrement en code, sans aucune image officielle. |
+| 🎬 **Intro animée** | Une animation de 5 secondes au lancement : horloge qui remonte le temps, ombres, éclats, puis une silhouette anonyme qui gravit un long escalier à contre-jour de la lune (vue de côté) — désactivable dans Réglages → Avancé. Dessinée entièrement en code, sans aucune image officielle. |
 | 📱 **PC & mobile** | Interface responsive, panneaux en « bottom sheet » sur téléphone, installable comme une application (PWA), fonctionne hors ligne, partage de lien depuis Android directement vers l'appli. |
 
 ## Mettre le site en ligne (GitHub Pages)
@@ -43,6 +45,23 @@ La qualité de la voix dépend des voix installées sur l'appareil :
 - **iPhone / iPad** : Réglages → Accessibilité → Contenu énoncé → Voix → Français → télécharge une voix **Premium** ou **Améliorée**.
 
 Choisis ensuite ta voix dans Réglages → Voix (bouton « Tester »).
+
+### Voix IA (encore plus naturelles, avec émotions)
+
+Réglages → Voix → **Moteur de voix** :
+
+- **OpenAI** : crée une clé sur platform.openai.com (API keys). Modèle `gpt-4o-mini-tts` : la voix joue l'émotion de la scène. ≈ 1,5 centime par minute d'écoute.
+- **ElevenLabs** : crée une clé sur elevenlabs.io (Profile → API keys). Offre gratuite ≈ 10 000 caractères/mois. Bouton « Charger mes voix » pour choisir parmi tes voix.
+
+La clé n'est stockée que dans ton navigateur et n'est envoyée qu'au service choisi.
+
+## Musiques d'ambiance (OST)
+
+1. Bouton 🎵 en haut → colle un lien YouTube (vidéo d'OST), coche une ou plusieurs ambiances, « Ajouter ».
+2. Pendant la lecture, l'ambiance détectée s'affiche dans le lecteur (ex. 💧 Triste). La musique correspondante démarre automatiquement, change en fondu quand la scène change, et se met en pause avec la voix.
+3. Clique sur la puce d'ambiance pour forcer une ambiance, passer à une autre musique ou couper la musique.
+
+Si aucune musique n'a exactement le bon tag, une ambiance proche est utilisée (ex. tension → mystère). Certaines vidéos interdisent la lecture hors de YouTube : elles sont signalées et ignorées.
 
 ## Sites qui bloquent les requêtes
 
@@ -74,11 +93,11 @@ En dernier recours : la carte **« Le site bloque ? Colle le texte »** de l'acc
 | `+` `−` | Vitesse |
 | `N` / `P` | Chapitre suivant / précédent |
 | `F` | Revenir à la voix |
-| `B` / `A` / `R` | Bibliothèque / Apparence / Réglages voix |
+| `B` / `A` / `R` / `M` | Bibliothèque / Apparence / Réglages voix / Musiques |
 
 ## Vie privée
 
-Tout reste sur ton appareil : la bibliothèque, les images et les réglages sont stockés dans le navigateur (IndexedDB / localStorage). Aucun compte, aucun serveur à moi. Seules les requêtes nécessaires pour récupérer les chapitres sont envoyées (au site du roman, à l'API WordPress.com ou au proxy).
+Tout reste sur ton appareil : la bibliothèque, les images, les musiques, le cache audio, les réglages et les clés API sont stockés dans le navigateur (IndexedDB / localStorage). Aucun compte, aucun serveur à moi. Seules les requêtes nécessaires sont envoyées : au site du roman (ou à l'API WordPress.com / au proxy), à YouTube pour les musiques, et au service de voix IA si tu en as choisi un.
 
 ## Structure du projet
 
@@ -88,7 +107,10 @@ css/style.css           thèmes et mise en page responsive
 js/main.js              orchestration (navigation, bibliothèque, lecteur, réglages)
 js/fetcher.js           récupération : API WordPress, requête directe, proxys CORS
 js/extractor.js         extraction du texte du roman + nettoyage + découpage en phrases
-js/tts.js               moteur de lecture (Web Speech API, suivi mot à mot)
+js/tts.js               moteur de lecture (Web Speech API, suivi mot à mot, prosodie expressive)
+js/neural.js            voix IA OpenAI / ElevenLabs (cache, préchargement, synchronisation)
+js/mood.js              analyse de l'ambiance du texte (lexique + ponctuation, lissage par scène)
+js/music.js             bibliothèque d'OST YouTube + lecteur + choix selon l'ambiance
 js/reader.js            rendu, surlignage, marqueur de voix, défilement automatique
 js/intro.js             intro animée de 5 s (canvas)
 js/db.js                stockage local (IndexedDB) + export/import

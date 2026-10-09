@@ -34,7 +34,16 @@ export const DEFAULTS = {
   paraSpacing: 1,        // em
   indent: false,
 
+  engine: 'browser',     // browser | openai | elevenlabs
   voiceURI: '',
+  expressiveness: 0.6,   // variations de ton (voix de l'appareil)
+  fluid: true,           // enchaîne plusieurs phrases par énoncé (moins de blancs)
+  openaiKey: '',
+  openaiModel: 'gpt-4o-mini-tts',
+  openaiVoice: 'coral',
+  elevenKey: '',
+  elevenModel: 'eleven_multilingual_v2',
+  elevenVoice: '21m00Tcm4TlvDq8ikWAM',
   rate: 1,
   pitch: 1,
   volume: 1,
@@ -49,6 +58,11 @@ export const DEFAULTS = {
   readTitle: true,       // lit le titre du chapitre avant le texte
   keepAwake: true,       // garde l'écran allumé pendant la lecture
   downloadImages: true,
+
+  musicAuto: true,       // musique automatique selon l'ambiance
+  musicVolume: 0.3,
+  musicFollowVoice: true, // pause de la musique quand la voix s'arrête
+  miniPlayerSmall: false,
 
   showIntro: true,
   customProxy: '',

@@ -1,5 +1,5 @@
 // Service worker : l'application fonctionne hors ligne (les chapitres sont dans IndexedDB).
-const VERSION = 'relecteur-v1';
+const VERSION = 'relecteur-v2';
 const SHELL = [
   './',
   './index.html',
@@ -12,6 +12,9 @@ const SHELL = [
   './js/tts.js',
   './js/reader.js',
   './js/intro.js',
+  './js/mood.js',
+  './js/music.js',
+  './js/neural.js',
   './vendor/Readability.js',
   './manifest.webmanifest',
   './icons/icon.svg',
@@ -60,5 +63,5 @@ self.addEventListener('fetch', e => {
       }).catch(async () => (await caches.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error())),
     );
   }
-  // Tout le reste (sites de romans, proxys) : pas d'interception.
+  // Tout le reste (sites de romans, proxys, YouTube, API de voix) : pas d'interception.
 });

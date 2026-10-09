@@ -184,16 +184,16 @@ export class Speaker extends EventTarget {
     this.setState('stopped');
   }
 
-  seek(index, { play } = {}) {
+  seek(index, { play, offset = 0 } = {}) {
     index = Math.max(0, Math.min(this.items.length - 1, index));
     const shouldPlay = play ?? this.state === 'playing';
     this.index = index;
-    this.charIndex = 0;
-    if (shouldPlay) this.playFrom(index, 0);
+    this.charIndex = offset;
+    if (shouldPlay) this.playFrom(index, offset);
     else {
       if (this.state === 'playing') this.pause();
       if (this.state === 'stopped') this.setState('paused');
-      this.emit('segment', { index, offset: 0 });
+      this.emit('segment', { index, offset });
     }
   }
 
@@ -227,7 +227,7 @@ export class Speaker extends EventTarget {
     setTimeout(() => {
       if (gen !== this.gen) return;
       this.speakItem(index, offset, gen);
-    }, 60);
+    }, 30);
   }
 
   speakItem(index, offset, gen) {
@@ -242,8 +242,9 @@ export class Speaker extends EventTarget {
     }
     const u = new SpeechSynthesisUtterance(text);
     if (this.voice) { u.voice = this.voice; u.lang = this.voice.lang; } else u.lang = this.lang;
-    u.rate = this.rate;
-    u.pitch = this.pitch;
+    // Prosodie expressive : chaque bloc peut moduler la vitesse et la hauteur de la voix
+    u.rate = Math.min(3, Math.max(0.3, this.rate * (item.rateMul || 1)));
+    u.pitch = Math.min(2, Math.max(0, this.pitch * (item.pitchMul || 1)));
     u.volume = this.volume;
     let startedAt = 0;
     let gotBoundary = false;

@@ -2,7 +2,7 @@
 // Aucune requête réseau n'est nécessaire pour rouvrir un chapitre déjà chargé.
 
 const DB_NAME = 'relecteur';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -20,6 +20,9 @@ function openDB() {
         const s = db.createObjectStore('images', { keyPath: 'key' });
         s.createIndex('chapterId', 'chapterId');
       }
+      // v2 : bibliothèque de musiques (OST YouTube) + cache des voix IA
+      if (!db.objectStoreNames.contains('osts')) db.createObjectStore('osts', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio', { keyPath: 'key' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -125,6 +128,31 @@ export async function requestPersistence() {
   return false;
 }
 
+// ---- Musiques (OST)
+
+export async function listOsts() {
+  const all = await tx(['osts'], 'readonly', t => reqP(t.objectStore('osts').getAll()));
+  return (all || []).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+}
+export async function saveOst(ost) {
+  return tx(['osts'], 'readwrite', t => { t.objectStore('osts').put(ost); });
+}
+export async function deleteOst(id) {
+  return tx(['osts'], 'readwrite', t => { t.objectStore('osts').delete(id); });
+}
+
+// ---- Cache audio des voix IA (évite de repayer une réécoute)
+
+export async function getAudio(key) {
+  return tx(['audio'], 'readonly', t => reqP(t.objectStore('audio').get(key)));
+}
+export async function saveAudio(key, blob, alignment) {
+  return tx(['audio'], 'readwrite', t => { t.objectStore('audio').put({ key, blob, alignment: alignment || null, savedAt: Date.now() }); });
+}
+export async function clearAudio() {
+  return tx(['audio'], 'readwrite', t => { t.objectStore('audio').clear(); });
+}
+
 // ---- Export / import (pour transférer sa bibliothèque d'un appareil à l'autre)
 
 function blobToDataURL(blob) {
@@ -148,7 +176,8 @@ export async function exportLibrary() {
   for (const img of images || []) {
     outImages.push({ key: img.key, chapterId: img.chapterId, srcUrl: img.srcUrl, data: await blobToDataURL(img.blob) });
   }
-  return { app: 'relecteur', version: 1, exportedAt: new Date().toISOString(), chapters, images: outImages };
+  const osts = await listOsts();
+  return { app: 'relecteur', version: 2, exportedAt: new Date().toISOString(), chapters, images: outImages, osts };
 }
 
 export async function importLibrary(json) {
@@ -159,9 +188,10 @@ export async function importLibrary(json) {
   for (const img of json.images || []) {
     try { imgs.push({ key: img.key, chapterId: img.chapterId, srcUrl: img.srcUrl, blob: await dataURLToBlob(img.data), savedAt: Date.now() }); } catch { /* ignore */ }
   }
-  await tx(['chapters', 'images'], 'readwrite', t => {
+  await tx(['chapters', 'images', 'osts'], 'readwrite', t => {
     json.chapters.forEach(c => t.objectStore('chapters').put(c));
     imgs.forEach(i => t.objectStore('images').put(i));
+    (json.osts || []).forEach(o => t.objectStore('osts').put(o));
   });
   return json.chapters.length;
 }

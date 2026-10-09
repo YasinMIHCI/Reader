@@ -3,7 +3,7 @@
 //  0.0 – 0.9 s  une horloge d'argent se dessine dans la nuit, runes en rotation
 //  0.9 – 2.3 s  les aiguilles s'emballent à rebours, des ombres violettes rampent depuis les bords
 //  2.3 – 2.6 s  battement de cœur, flash cramoisi : l'horloge vole en éclats (le temps est remonté)
-//  2.6 – 4.3 s  givre et cristaux, cercle magique, apparition du titre « Re:Lecteur »
+//  2.6 – 4.3 s  givre ; une silhouette gravit un long escalier à contre-jour (vue de côté), titre « Re:Lecteur »
 //  4.3 – 5.0 s  zoom et fondu vers l'application
 
 const DURATION = 5000;
@@ -449,39 +449,149 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     }
   }
 
-  function drawMagicCircle(t) {
-    const p = easeOut(seg(t, 2.65, 3.6));
-    if (p <= 0) return;
-    const r = Math.min(W, H) * 0.36;
+  // Scène 2D en vue de côté : une silhouette anonyme gravit un long escalier, à contre-jour de la lune.
+  function drawStairs(t) {
+    const appear = easeOut(seg(t, 2.55, 3.2));
+    if (appear <= 0) return;
+    const out = seg(t, 4.4, 5);
+    const alpha = appear * (1 - out);
+    const F = Math.min(H * 0.3, W * 0.4);          // taille de la silhouette
+    const L = F * 0.48;                              // longueur d'une jambe
+    const L1 = L * 0.52; const L2 = L * 0.48;
+    const sw = L * 0.42; const sh = sw * 0.62;        // giron / hauteur de marche
+    const s = 3 + Math.max(0, t - 2.45) / 0.3;        // marches gravies (continu)
+
+    // Lune (contre-jour)
+    const mx = W * 0.8; const my = H * 0.24; const mr = Math.min(W, H) * 0.13;
     ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.rotate(t * 0.25);
-    ctx.globalAlpha = 0.55 * p * (1 - seg(t, 4.4, 5));
-    ctx.strokeStyle = C.ice; ctx.shadowColor = C.ice; ctx.shadowBlur = 14; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU * p); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, r * 0.86, 0, -TAU * p, true); ctx.stroke();
-    // hexagramme
-    const tri = off => {
-      ctx.beginPath();
-      for (let i = 0; i <= 3; i++) {
-        const a = off + (i / 3) * TAU - Math.PI / 2;
-        const pp = Math.min(1, p * 1.2);
-        const x = Math.cos(a) * r * 0.86 * pp; const y = Math.sin(a) * r * 0.86 * pp;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    };
-    tri(0); tri(Math.PI / 3);
-    // runes sur l'anneau
-    ctx.strokeStyle = C.lavender; ctx.lineWidth = 1;
-    const n = 24;
-    for (let i = 0; i < Math.floor(n * p); i++) {
-      ctx.save();
-      ctx.rotate((i / n) * TAU);
-      ctx.translate(0, -r * 0.93);
-      drawGlyph(ctx, glyphs[i % glyphs.length], r * 0.045);
-      ctx.restore();
+    ctx.globalAlpha = alpha;
+    const halo = ctx.createRadialGradient(mx, my, mr * 0.6, mx, my, mr * 3.2);
+    halo.addColorStop(0, 'rgba(190,225,255,0.35)');
+    halo.addColorStop(1, 'rgba(190,225,255,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, W, H);
+    const moon = ctx.createRadialGradient(mx - mr * 0.3, my - mr * 0.3, mr * 0.1, mx, my, mr);
+    moon.addColorStop(0, '#f4f8ff'); moon.addColorStop(1, '#b9cfee');
+    ctx.fillStyle = moon;
+    ctx.shadowColor = C.ice; ctx.shadowBlur = 40;
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Caméra : la silhouette reste vers le tiers gauche, en remontant doucement
+    const prog = seg(t, 2.55, 5);
+    const ax = W * (0.15 + 0.08 * prog); const ay = H * (0.8 - 0.03 * prog);
+    const hipWX = (s + 1) * sw; const hipWY = -(s + 1.5) * sh - L * 0.9;
+    const toScreen = (x, y) => [x - hipWX + ax, y - hipWY + ay];
+
+    // Escalier (silhouette pleine + liseré de lumière)
+    const first = Math.floor(s) - 40; const last = Math.floor(s) + 60;
+    ctx.beginPath();
+    let [px, py] = toScreen(first * sw, -first * sh);
+    ctx.moveTo(px, H + 20);
+    ctx.lineTo(px, py);
+    for (let i = first; i <= last; i++) {
+      const [x1, y1] = toScreen(i * sw, -(i + 1) * sh);
+      const [x2] = toScreen((i + 1) * sw, 0);
+      ctx.lineTo(x1, y1); ctx.lineTo(x2, y1);
+      px = x2; py = y1;
     }
+    ctx.lineTo(px, H + 20);
+    ctx.closePath();
+    const sg = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    sg.addColorStop(0, '#0b0718'); sg.addColorStop(1, '#030108');
+    ctx.fillStyle = sg;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(168,232,255,0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.shadowColor = C.ice; ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Rampe
+    const railH = F * 0.55;
+    ctx.strokeStyle = 'rgba(10,6,22,0.95)';
+    ctx.lineWidth = 3;
+    const [r1x, r1y] = toScreen(first * sw, -first * sh - railH);
+    const [r2x, r2y] = toScreen(last * sw, -last * sh - railH);
+    ctx.beginPath(); ctx.moveTo(r1x, r1y); ctx.lineTo(r2x, r2y); ctx.stroke();
+    ctx.lineWidth = 2;
+    for (let i = first - (first % 3); i <= last; i += 3) {
+      const [bx, by] = toScreen((i + 0.5) * sw, -(i + 1) * sh);
+      const [tx, ty] = toScreen((i + 0.5) * sw, -(i + 0.5) * sh - railH);
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.stroke();
+    }
+
+    // Pieds : chaque pied monte de deux marches, en alternance
+    const foot = j => {
+      const u = (s - j) / 2;
+      const k = Math.floor(u); const f = u - k;
+      const a = j + 2 * k; const b = a + 2;
+      const pos = n => [(n + 0.55) * sw, -(n + 1) * sh];
+      if (f >= 0.5) return { p: pos(b), moving: 0 };
+      const e = easeInOut(f / 0.5);
+      const A = pos(a); const B = pos(b);
+      return { p: [lerp(A[0], B[0], e), lerp(A[1], B[1], e) - Math.sin(Math.PI * e) * sh * 2.2], moving: Math.sin(Math.PI * e) };
+    };
+    const feet = [foot(0), foot(1)];
+    const lean = 0.22;
+    // bassin au-dessus des deux pieds, la jambe d'appui presque tendue
+    const fy = Math.min(feet[0].p[1], feet[1].p[1]) * 0.35 + Math.max(feet[0].p[1], feet[1].p[1]) * 0.65;
+    const fx = (feet[0].p[0] + feet[1].p[0]) / 2;
+    const hip = toScreen(fx + sw * 0.15, fy - L * 0.93);
+    const T = F * 0.3;
+    const sho = [hip[0] + Math.sin(lean) * T, hip[1] - Math.cos(lean) * T];
+
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#020006';
+    ctx.fillStyle = '#020006';
+    ctx.shadowColor = 'rgba(168,232,255,0.8)'; ctx.shadowBlur = 12;
+
+    const limb = (from, to, l1, l2, bendForward, w) => {
+      let dx = to[0] - from[0]; let dy = to[1] - from[1];
+      let d = Math.hypot(dx, dy);
+      const maxD = (l1 + l2) * 0.999;
+      if (d > maxD) { dx *= maxD / d; dy *= maxD / d; d = maxD; }
+      const base = Math.atan2(dy, dx);
+      const a = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+      const ang = bendForward ? base - a : base + a;
+      const knee = [from[0] + Math.cos(ang) * l1, from[1] + Math.sin(ang) * l1];
+      const end = [from[0] + dx, from[1] + dy];
+      ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(from[0], from[1]); ctx.lineTo(knee[0], knee[1]); ctx.lineTo(end[0], end[1]); ctx.stroke();
+      return end;
+    };
+
+    // Jambe arrière puis bras arrière (plus sombres), corps, puis membres avant
+    const legW = F * 0.075; const armW = F * 0.05;
+    const swing = s * Math.PI;
+    const drawArm = phase => {
+      const ang = Math.PI / 2 + lean * 0.6 + Math.sin(phase) * 0.55;
+      const elbow = [sho[0] + Math.cos(ang) * F * 0.17, sho[1] + Math.sin(ang) * F * 0.17];
+      const fa = ang - 0.5 - Math.max(0, Math.sin(phase)) * 0.6;
+      const hand = [elbow[0] + Math.cos(fa) * F * 0.16, elbow[1] + Math.sin(fa) * F * 0.16];
+      ctx.lineWidth = armW;
+      ctx.beginPath(); ctx.moveTo(sho[0], sho[1]); ctx.lineTo(elbow[0], elbow[1]); ctx.lineTo(hand[0], hand[1]); ctx.stroke();
+    };
+    const back = feet[0].p[0] < feet[1].p[0] ? 0 : 1;
+    const front = 1 - back;
+    ctx.globalAlpha = alpha * 0.85;
+    const fb = feet[back].p; limb(hip, toScreen(fb[0], fb[1]), L1, L2, true, legW);
+    drawArm(swing);
+    ctx.globalAlpha = alpha;
+    // pan de manteau qui flotte
+    ctx.beginPath();
+    ctx.moveTo(sho[0] - F * 0.03, sho[1] + F * 0.05);
+    ctx.lineTo(hip[0] - F * 0.06 - Math.sin(t * 9) * F * 0.02, hip[1] + F * 0.12);
+    ctx.lineTo(hip[0] + F * 0.05, hip[1] + F * 0.03);
+    ctx.closePath(); ctx.fill();
+    // torse
+    ctx.lineWidth = F * 0.12;
+    ctx.beginPath(); ctx.moveTo(hip[0], hip[1]); ctx.lineTo(sho[0], sho[1]); ctx.stroke();
+    // tête (légèrement baissée, déterminée)
+    const head = [sho[0] + Math.sin(lean + 0.25) * F * 0.11, sho[1] - Math.cos(lean + 0.25) * F * 0.11];
+    ctx.beginPath(); ctx.arc(head[0], head[1], F * 0.068, 0, TAU); ctx.fill();
+    const ff = feet[front].p; limb(hip, toScreen(ff[0], ff[1]), L1, L2, true, legW);
+    drawArm(swing + Math.PI);
     ctx.restore();
   }
 
@@ -613,7 +723,7 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
 
     drawBackground(t);
-    drawMagicCircle(t);
+    drawStairs(t);
     drawTendrils(t);
     if (!reducedMotion) drawClockLayer(t);
     drawFlakes(t, dt);

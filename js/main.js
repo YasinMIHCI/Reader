@@ -7,6 +7,9 @@ import { getSettings, setSettings, resetSettings, onSettingsChange, applyAppeara
 import { Speaker, loadVoices, sortedVoices, pickVoice, voiceLabel, ttsSupported } from './tts.js';
 import { ReaderView, fmtDuration } from './reader.js';
 import { playIntro } from './intro.js';
+import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices } from './neural.js';
+import { analyzeChapter, MOODS, moodById, MOOD_PROSODY } from './mood.js';
+import { MusicManager } from './music.js';
 
 const EXAMPLE_URL = 'https://rezerowebnovelfr.wordpress.com/2024/12/21/arc-vii-chapitre-1-bapteme/';
 
@@ -25,10 +28,24 @@ const state = {
   wakeLock: null,
   saveTimer: null,
   knownIds: new Set(),
+  items: [],         // énoncés envoyés à la voix (une ou plusieurs phrases chacun)
+  segChunk: [],      // phrase -> { chunk, start }
+  currentSeg: -1,    // phrase en cours
+  currentLocal: 0,   // position du mot dans la phrase
+  blockMoods: [],    // ambiance de chaque bloc
 };
 
-const speaker = new Speaker();
+// Deux moteurs : voix de l'appareil (Web Speech) ou voix IA (OpenAI / ElevenLabs)
+const engines = { browser: new Speaker(), neural: new AudioSpeaker() };
+const engineFor = (s = getSettings()) => (s.engine === 'browser' ? engines.browser : engines.neural);
+let speaker = engineFor();
+/** Écoute un événement du moteur actif uniquement. */
+function on(type, fn) {
+  Object.values(engines).forEach(eng => eng.addEventListener(type, e => { if (eng === speaker) fn(e); }));
+}
 const reader = new ReaderView($('#reader'));
+// eslint-disable-next-line prefer-const
+let music;
 
 // =====================================================================
 // Utilitaires d'interface
@@ -74,6 +91,7 @@ function showDrawer(id) {
   $('#scrim').hidden = false;
   openDrawer = d;
   if (id === 'library') renderLibrary();
+  if (id === 'music') renderMusic();
   setTimeout(() => d.querySelector('input[type=search]')?.focus({ preventScroll: true }), 50);
 }
 function closeDrawers() {
@@ -288,8 +306,10 @@ async function openChapter(id, { autoplay = false, startSeg = null } = {}) {
   reader.anchor = s.scrollAnchor;
   reader.autoScroll = s.autoScroll;
 
-  const lang = chapter.lang || 'fr-FR';
-  speaker.setItems(state.segments.map(x => ({ text: x.text })), lang);
+  state.blockMoods = analyzeChapter(chapter.blocks);
+  markDialogue(state.segments);
+  speaker = engineFor();
+  buildItems();
   configureVoice();
   // met à jour la durée estimée maintenant que la voix est configurée
   const meta = $('.chapter-meta');
@@ -306,18 +326,19 @@ async function openChapter(id, { autoplay = false, startSeg = null } = {}) {
   let seg = startSeg ?? chapter.progress?.seg ?? 0;
   if (seg >= total) seg = 0;
   if (chapter.progress?.pct >= 0.995) seg = 0; // chapitre terminé : on recommence au début
-  speaker.index = seg;
+  positionAt(seg);
+  updateMood(seg);
   if (seg > 0) {
     reader.setCurrent(seg, { scroll: false });
     requestAnimationFrame(() => reader.scrollToSegment(seg, true));
-    if (!autoplay) toast(`Reprise à ${Math.round((seg / Math.max(1, total)) * 100)} %`, { action: { label: 'Depuis le début', fn: () => { speaker.seek(0); reader.setCurrent(0); window.scrollTo({ top: 0, behavior: 'smooth' }); } } });
+    if (!autoplay) toast(`Reprise à ${Math.round((seg / Math.max(1, total)) * 100)} %`, { action: { label: 'Depuis le début', fn: () => { seekSeg(0); window.scrollTo({ top: 0, behavior: 'smooth' }); } } });
   } else {
     window.scrollTo(0, 0);
   }
   updateProgressUI(seg);
   db.updateChapter(id, { lastReadAt: Date.now() });
 
-  if (autoplay && total) speaker.playFrom(seg, 0);
+  if (autoplay && total) playSeg(seg);
 
   // Tâches de fond : navigation entre chapitres + images
   discoverNav(chapter);
@@ -412,8 +433,10 @@ async function prefetchNext() {
 function configureVoice() {
   const s = getSettings();
   const lang = state.chapter?.lang || 'fr-FR';
-  const voice = pickVoice(s.voiceURI, lang);
-  speaker.configure({ voice, rate: s.rate, pitch: s.pitch, volume: s.volume });
+  if (speaker === engines.browser) {
+    const voice = pickVoice(s.voiceURI, lang);
+    speaker.configure({ voice, rate: s.rate, pitch: s.pitch, volume: s.volume });
+  } else speaker.configure({ rate: s.rate, volume: s.volume });
 }
 
 function fillVoiceSelects() {
@@ -478,6 +501,159 @@ function saveProgress(seg) {
   state.saveTimer = setTimeout(() => db.updateChapter(ch.id, { progress: ch.progress, lastReadAt: Date.now() }), 800);
 }
 
+// ---------------------------------------------------------------------
+// Énoncés : plusieurs phrases sont regroupées pour limiter les blancs entre phrases,
+// tout en gardant le suivi visuel phrase par phrase.
+
+function markDialogue(segs) {
+  let block = null; let depth = 0; let dash = false;
+  segs.forEach(sg => {
+    if (sg.block !== block) { block = sg.block; depth = 0; dash = /^[—–-]\s?/.test(sg.text); }
+    const opens = (sg.text.match(/[«“]/g) || []).length;
+    const closes = (sg.text.match(/[»”]/g) || []).length;
+    sg.dialogue = dash || depth > 0 || opens > 0 || /^["']/.test(sg.text);
+    depth = Math.max(0, depth + opens - closes);
+  });
+}
+
+function moodOfSeg(i) {
+  const sg = state.segments[i];
+  if (!sg) return 'calme';
+  const b = sg.block >= 0 ? sg.block : state.chapter?.blocks.findIndex(x => x.text) ?? 0;
+  return state.blockMoods[b] || 'calme';
+}
+
+function prosodyFor(it, e, k) {
+  const t = it.text.trim();
+  let r = 0; let p = 0;
+  if (it.dialogue) { p += 0.07; r += 0.02; }
+  if (/\?\s*[»”"]?$/.test(t)) p += 0.05;
+  if (/!/.test(t)) { r += 0.05; p += 0.04; }
+  if (/…|\.\.\./.test(t)) r -= 0.05;
+  const mp = MOOD_PROSODY[it.mood] || {};
+  r += mp.rate || 0; p += mp.pitch || 0;
+  p += (((k * 37) % 7) - 3) * 0.008; // petite variation naturelle d'un énoncé à l'autre
+  return { rate: 1 + r * e, pitch: 1 + p * e * 1.4 };
+}
+
+function buildItems() {
+  const s = getSettings();
+  const segs = state.segments;
+  const neural = speaker !== engines.browser;
+  const maxLen = neural ? 520 : (s.fluid ? 240 : 0);
+  const items = [];
+  state.segChunk = new Array(segs.length);
+  let cur = null;
+  segs.forEach((sg, i) => {
+    const mood = moodOfSeg(i);
+    const canMerge = cur && maxLen && cur.text.length + 1 + sg.text.length <= maxLen && cur.mood === mood
+      && (sg.block === -1) === (cur.block === -1) && (neural || cur.dialogue === sg.dialogue);
+    if (canMerge) {
+      const start = cur.text.length + 1;
+      cur.text += ' ' + sg.text;
+      cur.parts.push({ seg: i, start });
+      cur.dialogue = cur.dialogue || sg.dialogue;
+      state.segChunk[i] = { chunk: items.length - 1, start };
+    } else {
+      cur = { text: sg.text, parts: [{ seg: i, start: 0 }], mood, dialogue: sg.dialogue, block: sg.block };
+      items.push(cur);
+      state.segChunk[i] = { chunk: items.length - 1, start: 0 };
+    }
+  });
+  if (!neural) {
+    const e = s.expressiveness ?? 0.6;
+    items.forEach((it, k) => { const pr = prosodyFor(it, e, k); it.rateMul = pr.rate; it.pitchMul = pr.pitch; });
+  }
+  state.items = items;
+  speaker.setItems(items, state.chapter?.lang || 'fr-FR');
+}
+
+/** Énoncé + position -> phrase + position dans la phrase. */
+function locate(chunk, ci) {
+  const it = state.items[chunk];
+  if (!it) return { seg: Math.max(0, state.currentSeg), local: 0 };
+  let part = it.parts[0];
+  for (const p of it.parts) { if (p.start <= ci) part = p; else break; }
+  return { seg: part.seg, local: Math.max(0, ci - part.start) };
+}
+
+function setSegFromEngine(seg) {
+  if (seg === state.currentSeg) return;
+  state.currentSeg = seg;
+  reader.setCurrent(seg);
+  updateProgressUI(seg);
+  saveProgress(seg);
+  const total = state.segments.length;
+  if (total && seg / total > 0.5) prefetchNext();
+  updateMood(seg);
+}
+
+/** Place la lecture sur une phrase sans lancer la voix. */
+function positionAt(seg) {
+  const m = state.segChunk[seg] || { chunk: 0, start: 0 };
+  speaker.index = m.chunk;
+  speaker.charIndex = m.start;
+  state.currentSeg = seg;
+  state.currentLocal = 0;
+}
+
+function seekSeg(i, { play } = {}) {
+  if (!state.segments.length) return;
+  i = Math.max(0, Math.min(state.segments.length - 1, i));
+  const m = state.segChunk[i];
+  state.currentLocal = 0;
+  speaker.seek(m.chunk, { play, offset: m.start });
+  state.currentSeg = -1;
+  setSegFromEngine(i);
+}
+const playSeg = i => seekSeg(i, { play: true });
+const nextSeg = () => seekSeg(state.currentSeg + 1);
+function prevSeg() {
+  if (state.currentLocal > 12 && speaker.playing) seekSeg(state.currentSeg);
+  else seekSeg(state.currentSeg - 1);
+}
+
+/** Change de moteur / regroupement en gardant la position. */
+function rebuildItems() {
+  const was = speaker.playing;
+  speaker.stop();
+  speaker = engineFor();
+  if (!state.chapter) return;
+  const seg = Math.max(0, state.currentSeg);
+  buildItems();
+  configureVoice();
+  positionAt(seg);
+  updatePlayButton();
+  updateProgressUI(seg);
+  if (was) playSeg(seg);
+}
+
+// ---------------------------------------------------------------------
+// Ambiance
+
+function updateMood(seg) {
+  if (!state.chapter) return;
+  const mood = moodOfSeg(seg);
+  state.sceneMood = mood;
+  music?.setSceneMood(mood);
+  renderMoodChip();
+}
+
+function renderMoodChip() {
+  const m = moodById(music?.mood || state.sceneMood || 'calme');
+  $('#mood-emoji').textContent = m.emoji;
+  $('#mood-label').textContent = m.label;
+  const btn = $('#btn-mood');
+  btn.classList.toggle('manual', !!music?.manualMood);
+  btn.title = `Ambiance : ${m.label}${music?.manualMood ? ' (forcée)' : ' (détectée)'} — musique`;
+  if (btn.dataset.mood !== m.id) {
+    btn.dataset.mood = m.id;
+    btn.classList.add('pulse');
+    setTimeout(() => btn.classList.remove('pulse'), 600);
+  }
+  $('#mini-mood').textContent = m.emoji;
+}
+
 function startPlayback() {
   if (!state.segments.length) return;
   if (speaker.state === 'paused') {
@@ -486,9 +662,9 @@ function startPlayback() {
     return;
   }
   // Première lecture : depuis la position sauvegardée, sinon depuis ce qui est visible à l'écran
-  let from = speaker.index || 0;
+  let from = Math.max(0, state.currentSeg);
   if (from === 0 && window.scrollY > 200) from = reader.firstVisibleSegment();
-  speaker.playFrom(from, 0);
+  playSeg(from);
 }
 
 function togglePlay() {
@@ -496,25 +672,27 @@ function togglePlay() {
   else startPlayback();
 }
 
-speaker.addEventListener('segment', e => {
-  const { index } = e.detail;
-  reader.setCurrent(index);
-  updateProgressUI(index);
-  saveProgress(index);
-  const total = state.segments.length;
-  if (total && index / total > 0.5) prefetchNext();
+on('segment', e => {
+  const loc = locate(e.detail.index, e.detail.offset);
+  state.currentLocal = loc.local;
+  setSegFromEngine(loc.seg);
 });
-speaker.addEventListener('word', e => {
-  const { index, charIndex, charLength } = e.detail;
-  reader.setWord(index, charIndex, charLength);
+on('word', e => {
+  const loc = locate(e.detail.index, e.detail.charIndex);
+  setSegFromEngine(loc.seg);
+  state.currentLocal = loc.local;
+  reader.setWord(loc.seg, loc.local, e.detail.charLength);
 });
-speaker.addEventListener('state', () => {
+on('loading', e => $('#btn-play').classList.toggle('loading', !!e.detail));
+on('state', () => {
   updatePlayButton();
+  music?.onVoiceState(speaker.state === 'playing');
+  if (speaker.state !== 'playing') $('#btn-play').classList.remove('loading');
   handleWakeLock();
   if (speaker.state !== 'playing') updateFollowButton();
 });
-speaker.addEventListener('error', e => toast(e.detail.message, { type: 'error' }));
-speaker.addEventListener('end', () => {
+on('error', e => toast(e.detail.message, { type: 'error', duration: 7000 }));
+on('end', () => {
   const ch = state.chapter;
   if (!ch) return;
   ch.progress = { seg: state.segments.length - 1, pct: 1 };
@@ -555,9 +733,7 @@ reader.addEventListener('userscroll', () => {
 reader.addEventListener('seek', e => {
   const i = e.detail.index;
   reader.detached = false;
-  if (speaker.state === 'playing') speaker.seek(i, { play: true });
-  else { speaker.playFrom(i, 0); }
-  reader.setCurrent(i, { scroll: false });
+  playSeg(i);
 });
 reader.addEventListener('imageclick', e => {
   const lb = $('#lightbox');
@@ -624,8 +800,8 @@ function setupMediaSession() {
     set('play', () => startPlayback());
     set('pause', () => speaker.pause());
     set('stop', () => speaker.pause());
-    set('seekbackward', () => speaker.prev());
-    set('seekforward', () => speaker.next());
+    set('seekbackward', () => prevSeg());
+    set('seekforward', () => nextSeg());
     set('previoustrack', () => goNav('prev', state.chapter?.nav?.prev));
     set('nexttrack', () => goNav('next', state.chapter?.nav?.next));
   } catch { /* ignore */ }
@@ -665,7 +841,7 @@ function setSleep(value) {
 function paragraphJump(dir) {
   const segs = state.segments;
   if (!segs.length) return;
-  let i = Math.max(0, speaker.index);
+  let i = Math.max(0, state.currentSeg);
   const block = segs[i]?.block;
   if (dir > 0) {
     while (i < segs.length - 1 && segs[i].block === block) i++;
@@ -673,7 +849,7 @@ function paragraphJump(dir) {
     // début du paragraphe courant, ou du précédent si on y est déjà
     let start = i;
     while (start > 0 && segs[start - 1].block === block) start--;
-    if (start === i || speaker.charIndex < 5) {
+    if (start === i || state.currentLocal < 5) {
       if (start > 0) {
         const pb = segs[start - 1].block;
         start--;
@@ -682,9 +858,7 @@ function paragraphJump(dir) {
     }
     i = start;
   }
-  speaker.seek(i);
-  reader.setCurrent(i);
-  updateProgressUI(i);
+  seekSeg(i);
 }
 
 function changeRate(delta) {
@@ -803,8 +977,22 @@ const RANGE_FORMAT = {
   pitch: v => (+v).toFixed(2).replace('.', ','),
   volume: v => `${Math.round(v * 100)} %`,
   scrollAnchor: v => `${Math.round(v * 100)} %`,
+  expressiveness: v => `${Math.round(v * 100)} %`,
+  musicVolume: v => `${Math.round(v * 100)} %`,
 };
-const BOOL_KEYS = ['indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages'];
+const BOOL_KEYS = ['indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages', 'fluid', 'musicAuto', 'musicFollowVoice'];
+const TEXT_KEYS = ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'];
+
+function elevenVoiceOptions() {
+  let custom = [];
+  try { custom = JSON.parse(localStorage.getItem('relecteur.elevenVoices') || '[]'); } catch { /* ignore */ }
+  return custom.length ? custom.map(v => [v.id, v.name]) : ELEVEN_DEFAULT_VOICES;
+}
+function fillSelect(sel, options, value) {
+  sel.innerHTML = '';
+  options.forEach(([v, label]) => sel.append(new Option(label, v, false, v === value)));
+  if (value && ![...sel.options].some(o => o.value === value)) sel.append(new Option(value, value, true, true));
+}
 
 function buildSettingsUI() {
   // Thèmes
@@ -852,9 +1040,43 @@ function buildSettingsUI() {
   const onVoice = e => setSettings({ voiceURI: e.target.value });
   $('#set-voice').addEventListener('change', onVoice);
   $('#voice-quick').addEventListener('change', onVoice);
+  // Moteur de voix & voix IA
+  $('#set-engine').addEventListener('change', e => setSettings({ engine: e.target.value }));
+  TEXT_KEYS.forEach(k => {
+    const el = $('#set-' + k);
+    el?.addEventListener('change', () => setSettings({ [k]: el.value.trim() }));
+  });
+  fillSelect($('#set-openaiModel'), OPENAI_MODELS, getSettings().openaiModel);
+  fillSelect($('#set-openaiVoice'), OPENAI_VOICES, getSettings().openaiVoice);
+  fillSelect($('#set-elevenModel'), ELEVEN_MODELS, getSettings().elevenModel);
+  fillSelect($('#set-elevenVoice'), elevenVoiceOptions(), getSettings().elevenVoice);
+  $('#eleven-load-voices').addEventListener('click', async () => {
+    const key = $('#set-elevenKey').value.trim();
+    if (!key) { toast("Colle d'abord ta clé API ElevenLabs.", { type: 'error' }); return; }
+    setSettings({ elevenKey: key });
+    try {
+      const voices = await listElevenVoices(key);
+      localStorage.setItem('relecteur.elevenVoices', JSON.stringify(voices.map(v => ({ id: v.id, name: `${v.name}${v.labels.accent ? ' · ' + v.labels.accent : ''}${v.labels.gender ? ' · ' + v.labels.gender : ''}` }))));
+      fillSelect($('#set-elevenVoice'), elevenVoiceOptions(), getSettings().elevenVoice);
+      toast(`${voices.length} voix chargées.`);
+    } catch (err) { toast(err.message, { type: 'error' }); }
+  });
+  $('#audio-cache-clear').addEventListener('click', async () => {
+    await db.clearAudio();
+    toast('Cache audio vidé.');
+  });
   $('#voice-test').addEventListener('click', () => {
-    if (!ttsSupported) return;
     const s = getSettings();
+    if (s.engine !== 'browser') {
+      if (speaker.playing) speaker.pause();
+      const t = new AudioSpeaker();
+      t.addEventListener('error', e => toast(e.detail.message, { type: 'error', duration: 7000 }));
+      t.setItems([{ text: "Bonjour ! Je suis la voix qui va te lire tes chapitres. Prêt ? Alors, on commence…", mood: 'joyeux', dialogue: true }], 'fr-FR');
+      t.configure({ rate: s.rate, volume: s.volume });
+      t.playFrom(0, 0);
+      return;
+    }
+    if (!ttsSupported) return;
     const v = pickVoice(s.voiceURI, state.chapter?.lang || 'fr-FR');
     const wasPlaying = speaker.playing;
     if (wasPlaying) speaker.pause();
@@ -889,6 +1111,10 @@ function syncSettingsUI() {
   BOOL_KEYS.forEach(k => { const i = $('#set-' + k); if (i) i.checked = !!s[k]; });
   $$('[data-align]').forEach(b => b.classList.toggle('on', b.dataset.align === s.align));
   $('#set-customProxy').value = s.customProxy || '';
+  $('#set-engine').value = s.engine;
+  $$('.engine-panel').forEach(pn => { pn.hidden = pn.dataset.engine !== s.engine; });
+  $('#audio-cache-clear').hidden = s.engine === 'browser';
+  TEXT_KEYS.forEach(k => { const el = $('#set-' + k); if (el && document.activeElement !== el) el.value = s[k] || ''; });
   $('#btn-speed').textContent = `${String(s.rate).replace('.', ',')}×`;
   const sr = $('#speed-range');
   sr.value = s.rate;
@@ -902,8 +1128,14 @@ onSettingsChange((s, patch) => {
   if ('voiceURI' in patch || 'rate' in patch || 'pitch' in patch || 'volume' in patch) {
     configureVoice();
     if ('voiceURI' in patch) fillVoiceSelects();
-    if (state.chapter) updateProgressUI(Math.max(0, speaker.index));
+    if (state.chapter) updateProgressUI(Math.max(0, state.currentSeg));
   }
+  if ('engine' in patch || 'fluid' in patch || 'expressiveness' in patch
+    || (s.engine !== 'browser' && ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'].some(k => k in patch))) {
+    rebuildItems();
+  }
+  if ('musicVolume' in patch) music?.applyVolume();
+  if ('musicAuto' in patch && !s.musicAuto) music?.stop();
   if ('scrollAnchor' in patch) reader.anchor = s.scrollAnchor;
   if ('autoScroll' in patch) reader.autoScroll = s.autoScroll;
   if ('keepAwake' in patch) handleWakeLock();
@@ -918,6 +1150,172 @@ onSettingsChange((s, patch) => {
     state.relayout = setTimeout(() => { reader.lastLineTop = null; reader.updateMarker(false); }, 120);
   }
 });
+
+// =====================================================================
+// Musiques d'ambiance
+// =====================================================================
+
+const ostTagSel = new Set();
+
+function moodButton(m, { on, onClick, count } = {}) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = on ? 'on' : '';
+  b.innerHTML = `<span>${m.emoji}</span><span>${m.label}</span>${count !== undefined ? `<span class="count">${count}</span>` : ''}`;
+  b.onclick = onClick;
+  return b;
+}
+
+function renderOstTagPicker() {
+  const box = $('#ost-tags');
+  box.innerHTML = '';
+  MOODS.forEach(m => box.append(moodButton(m, {
+    on: ostTagSel.has(m.id),
+    onClick: () => { ostTagSel.has(m.id) ? ostTagSel.delete(m.id) : ostTagSel.add(m.id); renderOstTagPicker(); },
+  })));
+}
+
+function renderMusic() {
+  if (!music) return;
+  renderOstTagPicker();
+  const counts = music.countByMood();
+  const cov = $('#mood-coverage');
+  cov.innerHTML = '';
+  MOODS.forEach(m => {
+    const sp = document.createElement('span');
+    sp.className = counts[m.id] ? '' : 'empty';
+    sp.textContent = `${m.emoji} ${m.label} · ${counts[m.id]}`;
+    sp.title = counts[m.id] ? '' : 'Aucune musique pour cette ambiance : une ambiance proche sera utilisée';
+    cov.append(sp);
+  });
+  $('#ost-count').textContent = music.tracks.length ? `(${music.tracks.length})` : '';
+  const list = $('#ost-list');
+  list.innerHTML = '';
+  if (!music.tracks.length) {
+    list.innerHTML = '<div class="lib-empty">Aucune musique pour l\'instant.<br>Ajoute des liens YouTube d\'OST et choisis leurs ambiances : elles se lanceront toutes seules selon ce qui se passe dans l\'histoire.</div>';
+    return;
+  }
+  [...music.tracks].reverse().forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'ost-item' + (music.current?.id === t.id ? ' playing' : '') + (t.broken ? ' broken' : '');
+    const thumb = document.createElement('button');
+    thumb.type = 'button';
+    thumb.className = 'ost-thumb';
+    thumb.title = 'Écouter';
+    thumb.innerHTML = `<img alt="" loading="lazy" src="https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg"><span>▶</span>`;
+    thumb.onclick = () => { music.previewTrack(t); };
+    const main = document.createElement('div');
+    main.className = 'ost-main';
+    const title = document.createElement('div');
+    title.className = 'ost-title';
+    const tt = document.createElement('span');
+    tt.textContent = (t.broken ? '⚠️ ' : '') + (t.title || `Vidéo ${t.videoId}`);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.title = 'Supprimer';
+    del.innerHTML = '<svg><use href="#i-trash"/></svg>';
+    del.onclick = () => { if (confirm(`Supprimer « ${t.title || t.videoId} » ?`)) music.remove(t); };
+    title.append(tt, del);
+    const tags = document.createElement('div');
+    tags.className = 'ost-tags';
+    MOODS.forEach(m => tags.append(moodButton(m, {
+      on: t.tags.includes(m.id),
+      onClick: () => music.update(t, { tags: t.tags.includes(m.id) ? t.tags.filter(x => x !== m.id) : [...t.tags, m.id], broken: false }),
+    })));
+    main.append(title, tags);
+    row.append(thumb, main);
+    list.append(row);
+  });
+}
+
+function renderMoodPop() {
+  const grid = $('#mood-grid');
+  grid.innerHTML = '';
+  const counts = music.countByMood();
+  const detected = moodById(state.sceneMood || 'calme');
+  $('#mood-detected').textContent = state.chapter ? `Détectée dans le texte : ${detected.emoji} ${detected.label}` : '';
+  const auto = moodButton({ emoji: '✨', label: 'Automatique (selon le texte)' }, { on: !music.manualMood, onClick: () => { music.setManualMood(null); renderMoodPop(); renderMoodChip(); } });
+  auto.classList.add('auto');
+  grid.append(auto);
+  MOODS.forEach(m => grid.append(moodButton(m, {
+    on: music.manualMood === m.id,
+    count: counts[m.id],
+    onClick: () => { music.setManualMood(m.id); renderMoodPop(); renderMoodChip(); },
+  })));
+  $('#mood-music-toggle').textContent = music.isPlaying() ? '⏸ Pause musique' : '♪ Lancer la musique';
+}
+
+function setupMusic() {
+  music = new MusicManager({ toast });
+  music.init().then(() => renderMoodChip());
+  music.addEventListener('needplayer', () => { $('#mini-player').hidden = false; });
+  music.addEventListener('track', e => {
+    const t = e.detail;
+    $('#mini-player').hidden = !t;
+    $('#mini-title').textContent = t ? (t.title || 'Musique') : '';
+    if (openDrawer?.id === 'music') renderMusic();
+  });
+  music.addEventListener('change', () => {
+    if (openDrawer?.id === 'music') renderMusic();
+    if (music.current) $('#mini-title').textContent = music.current.title || 'Musique';
+  });
+  music.addEventListener('mood', () => renderMoodChip());
+  $('#mini-player').classList.toggle('small', !!getSettings().miniPlayerSmall);
+
+  $('#ost-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const url = $('#ost-url').value;
+    if (!ostTagSel.size) { toast('Choisis au moins une ambiance pour cette musique.', { type: 'error' }); return; }
+    const tags = [...ostTagSel];
+    // on vide le formulaire tout de suite (permet d'enchaîner plusieurs ajouts)
+    $('#ost-url').value = '';
+    ostTagSel.clear();
+    renderOstTagPicker();
+    try {
+      await music.add(url, tags);
+      renderMusic();
+      toast('Musique ajoutée 🎵');
+    } catch (err) {
+      if (!$('#ost-url').value) $('#ost-url').value = url;
+      if (!ostTagSel.size) { tags.forEach(t => ostTagSel.add(t)); renderOstTagPicker(); }
+      toast(err.message, { type: 'error' });
+    }
+  });
+  $('#btn-music').addEventListener('click', () => showDrawer('music'));
+  $('#btn-mood').addEventListener('click', e => {
+    e.stopPropagation();
+    $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true;
+    const pop = $('#mood-pop');
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden) renderMoodPop();
+  });
+  $('#mood-music-toggle').addEventListener('click', () => {
+    if (!music.tracks.length) { $('#mood-pop').hidden = true; showDrawer('music'); toast('Ajoute d\'abord des musiques à ta bibliothèque.'); return; }
+    music.togglePause();
+    setTimeout(renderMoodPop, 600);
+  });
+  $('#mood-music-next').addEventListener('click', () => {
+    if (!music.tracks.length) { $('#mood-pop').hidden = true; showDrawer('music'); return; }
+    music.next();
+  });
+  $('#mood-open-library').addEventListener('click', () => { $('#mood-pop').hidden = true; showDrawer('music'); });
+  $('#mini-toggle').addEventListener('click', () => music.togglePause());
+  $('#mini-next').addEventListener('click', () => music.next());
+  $('#mini-size').addEventListener('click', () => {
+    const small = !getSettings().miniPlayerSmall;
+    setSettings({ miniPlayerSmall: small });
+    $('#mini-player').classList.toggle('small', small);
+  });
+  $('#mini-close').addEventListener('click', () => {
+    music.stop();
+    $('#mini-player').hidden = true;
+    if (getSettings().musicAuto) {
+      setSettings({ musicAuto: false });
+      toast('Musique automatique désactivée.', { action: { label: 'Réactiver', fn: () => setSettings({ musicAuto: true }) } });
+    }
+  });
+}
 
 // =====================================================================
 // Événements
@@ -979,6 +1377,7 @@ function bindEvents() {
     try {
       const n = await db.importLibrary(JSON.parse(await f.text()));
       toast(`${n} chapitre(s) importé(s).`);
+      music?.reload();
       renderLibrary();
       renderHome();
     } catch (err) { toast(err.message, { type: 'error' }); }
@@ -996,8 +1395,8 @@ function bindEvents() {
 
   // Lecteur audio
   $('#btn-play').addEventListener('click', togglePlay);
-  $('#btn-prev').addEventListener('click', () => speaker.prev());
-  $('#btn-next').addEventListener('click', () => speaker.next());
+  $('#btn-prev').addEventListener('click', () => prevSeg());
+  $('#btn-next').addEventListener('click', () => nextSeg());
   $('#btn-prev-chap').addEventListener('click', () => goNav('prev', state.chapter?.nav?.prev));
   $('#btn-next-chap').addEventListener('click', () => goNav('next', state.chapter?.nav?.next));
   const prog = $('#progress');
@@ -1009,20 +1408,18 @@ function bindEvents() {
   prog.addEventListener('change', () => {
     const i = +prog.value;
     reader.detached = false;
-    speaker.seek(i);
-    reader.setCurrent(i, { scroll: false });
+    seekSeg(i);
     reader.refocus();
-    updateProgressUI(i);
-    saveProgress(i);
   });
   const togglePop = (id, other) => {
     $('#' + other).hidden = true;
+    $('#mood-pop').hidden = true;
     $('#' + id).hidden = !$('#' + id).hidden;
   };
   $('#btn-speed').addEventListener('click', e => { e.stopPropagation(); togglePop('speed-pop', 'sleep-pop'); });
   $('#btn-sleep').addEventListener('click', e => { e.stopPropagation(); togglePop('sleep-pop', 'speed-pop'); });
   document.addEventListener('click', e => {
-    if (!e.target.closest('.speed-pop, .sleep-pop, #btn-speed, #btn-sleep')) { $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true; }
+    if (!e.target.closest('.speed-pop, .sleep-pop, .mood-pop, #btn-speed, #btn-sleep, #btn-mood')) { $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true; $('#mood-pop').hidden = true; }
   });
   $('#speed-range').addEventListener('input', e => setSettings({ rate: parseFloat(e.target.value) }));
   $$('[data-speed]').forEach(b => b.addEventListener('click', () => setSettings({ rate: +b.dataset.speed })));
@@ -1038,16 +1435,17 @@ function bindEvents() {
   window.addEventListener('keydown', e => {
     if (e.target.closest('input, textarea, select, [contenteditable]') || e.ctrlKey || e.metaKey || e.altKey) return;
     if (document.querySelector('.intro')) return;
-    if (e.key === 'Escape') { closeDrawers(); $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true; return; }
+    if (e.key === 'Escape') { closeDrawers(); $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true; $('#mood-pop').hidden = true; return; }
     const inReader = !$('#view-reader').hidden;
     const k = e.key.toLowerCase();
+    if (k === 'm') { openDrawer?.id === 'music' ? closeDrawers() : showDrawer('music'); return; }
     if (k === 'b') { openDrawer?.id === 'library' ? closeDrawers() : showDrawer('library'); return; }
     if (k === 'a') { if (openDrawer?.id === 'settings') closeDrawers(); else { showDrawer('settings'); selectTab('appearance'); } return; }
     if (k === 'r') { if (openDrawer?.id === 'settings') closeDrawers(); else { showDrawer('settings'); selectTab('voice'); } return; }
     if (!inReader) return;
     if (e.key === ' ' || k === 'k') { e.preventDefault(); togglePlay(); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); e.shiftKey ? paragraphJump(1) : speaker.next(); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.shiftKey ? paragraphJump(-1) : speaker.prev(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); e.shiftKey ? paragraphJump(1) : nextSeg(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.shiftKey ? paragraphJump(-1) : prevSeg(); }
     else if (e.key === '+' || e.key === '=') changeRate(0.05);
     else if (e.key === '-' || e.key === '_') changeRate(-0.05);
     else if (k === 'n') goNav('next', state.chapter?.nav?.next);
@@ -1082,6 +1480,7 @@ async function boot() {
   buildSettingsUI();
   syncSettingsUI();
   bindEvents();
+  setupMusic();
   registerSW();
 
   loadVoices().then(() => { fillVoiceSelects(); configureVoice(); });

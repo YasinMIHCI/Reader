@@ -38,6 +38,7 @@
       <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
       <symbol id="i-paste" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9z"/></symbol>
       <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="16" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
       <symbol id="i-down" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7"/></symbol>
       <symbol id="i-logo" viewBox="0 0 64 64">
         <circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="3"/>
@@ -60,6 +61,7 @@
     <div class="topbar-actions">
       <button class="icon-btn" id="btn-new" type="button" title="Nouveau chapitre" aria-label="Nouveau chapitre"><svg><use href="#i-plus"/></svg></button>
       <button class="icon-btn" id="btn-library" type="button" title="Bibliothèque (B)" aria-label="Bibliothèque"><svg><use href="#i-book"/></svg></button>
+      <button class="icon-btn" id="btn-music" type="button" title="Musiques d'ambiance (M)" aria-label="Musiques"><svg><use href="#i-music"/></svg></button>
       <button class="icon-btn" id="btn-appearance" type="button" title="Apparence (A)" aria-label="Apparence"><svg><use href="#i-text"/></svg></button>
       <button class="icon-btn" id="btn-settings" type="button" title="Voix & réglages (R)" aria-label="Réglages"><svg><use href="#i-gear"/></svg></button>
     </div>
@@ -142,6 +144,17 @@
       <button class="icon-btn" id="btn-next" type="button" title="Phrase suivante (→)" aria-label="Phrase suivante"><svg><use href="#i-fwd"/></svg></button>
       <button class="icon-btn hide-sm" id="btn-next-chap" type="button" title="Chapitre suivant (N)" aria-label="Chapitre suivant"><svg><use href="#i-skip-next"/></svg></button>
       <button class="speed-btn" id="btn-speed" type="button" title="Vitesse (+ / −)" aria-label="Vitesse">1×</button>
+      <button class="mood-btn" id="btn-mood" type="button" title="Ambiance de la scène &amp; musique" aria-label="Ambiance"><span id="mood-emoji">🍃</span><span class="mood-label" id="mood-label">Calme</span></button>
+    </div>
+    <div class="mood-pop" id="mood-pop" hidden>
+      <p class="pop-title">Ambiance de la scène</p>
+      <p class="muted small" id="mood-detected"></p>
+      <div class="mood-grid" id="mood-grid"></div>
+      <div class="row wrap">
+        <button type="button" class="btn small" id="mood-music-toggle">♪ Musique</button>
+        <button type="button" class="btn small" id="mood-music-next">Autre musique</button>
+        <button type="button" class="btn small" id="mood-open-library">Bibliothèque musicale</button>
+      </div>
     </div>
     <div class="speed-pop" id="speed-pop" hidden>
       <div class="speed-row">
@@ -232,10 +245,38 @@
       </div>
 
       <div class="tab-panel" data-panel="voice" hidden>
-        <h3>Voix</h3>
-        <select id="set-voice"></select>
-        <div class="row">
+        <h3>Moteur de voix</h3>
+        <select id="set-engine">
+          <option value="browser">Voix de l'appareil (gratuit)</option>
+          <option value="openai">OpenAI — très naturelle, joue les émotions (clé API)</option>
+          <option value="elevenlabs">ElevenLabs — ultra-réaliste (clé API)</option>
+        </select>
+
+        <div class="engine-panel" data-engine="browser">
+          <select id="set-voice"></select>
+          <label class="slider"><span>Expressivité (variations de ton) <output id="out-expressiveness"></output></span><input type="range" id="set-expressiveness" min="0" max="1" step="0.05"></label>
+          <label class="switch"><input type="checkbox" id="set-fluid"><span>Enchaînement fluide (moins de blanc entre les phrases)</span></label>
+          <p class="muted small">Les voix de l'appareil ne savent pas vraiment jouer les émotions : Re:Lecteur fait varier le ton et le rythme selon les dialogues, la ponctuation et l'ambiance. Pour une vraie interprétation, utilise Edge (voix « Natural ») ou un moteur IA ci-dessus.</p>
+        </div>
+
+        <div class="engine-panel" data-engine="openai" hidden>
+          <label class="field"><span>Clé API OpenAI</span><input type="password" id="set-openaiKey" placeholder="sk-…" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Modèle</span><select id="set-openaiModel"></select></label>
+          <label class="field"><span>Voix</span><select id="set-openaiVoice"></select></label>
+          <p class="muted small">La voix reçoit des consignes de jeu selon la scène détectée (triste, action, romantique…). Coût indicatif : environ 1,5 centime par minute d'écoute. Crée une clé sur platform.openai.com → API keys. La clé reste uniquement dans ce navigateur.</p>
+        </div>
+
+        <div class="engine-panel" data-engine="elevenlabs" hidden>
+          <label class="field"><span>Clé API ElevenLabs</span><input type="password" id="set-elevenKey" placeholder="sk_…" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Modèle</span><select id="set-elevenModel"></select></label>
+          <label class="field"><span>Voix</span><select id="set-elevenVoice"></select></label>
+          <button class="btn small" type="button" id="eleven-load-voices">Charger mes voix ElevenLabs</button>
+          <p class="muted small">Synchronisation mot à mot exacte. Offre gratuite ≈ 10 000 caractères / mois (1 à 2 chapitres). Le modèle v3 reçoit des indications d'émotion selon la scène. La clé reste uniquement dans ce navigateur.</p>
+        </div>
+
+        <div class="row wrap">
           <button class="btn small" id="voice-test" type="button"><svg><use href="#i-play"/></svg>Tester</button>
+          <button class="btn small" id="audio-cache-clear" type="button" hidden>Vider le cache audio</button>
           <span class="muted small" id="voice-count"></span>
         </div>
         <label class="slider"><span>Vitesse <output id="out-rate"></output></span><input type="range" id="set-rate" min="0.5" max="2.5" step="0.05"></label>
@@ -279,12 +320,55 @@
           <li><kbd>Maj</kbd>+<kbd>←</kbd> <kbd>→</kbd> paragraphe précédent / suivant</li>
           <li><kbd>+</kbd> <kbd>−</kbd> vitesse</li>
           <li><kbd>N</kbd> / <kbd>P</kbd> chapitre suivant / précédent</li>
-          <li><kbd>F</kbd> suivre la voix · <kbd>B</kbd> bibliothèque · <kbd>A</kbd> apparence</li>
+          <li><kbd>F</kbd> suivre la voix · <kbd>B</kbd> bibliothèque · <kbd>A</kbd> apparence · <kbd>M</kbd> musiques</li>
         </ul>
 
         <h3>Données</h3>
         <button class="btn small" id="btn-reset-settings" type="button">Réinitialiser les réglages</button>
       </div>
+    </div>
+  </aside>
+
+  <!-- Mini-lecteur de musique (YouTube) -->
+  <div class="mini-player" id="mini-player" hidden>
+    <div class="mini-video"><div id="yt-player"></div></div>
+    <div class="mini-info">
+      <span class="mini-mood" id="mini-mood">🍃</span>
+      <span class="mini-title" id="mini-title">Musique</span>
+    </div>
+    <div class="mini-actions">
+      <button class="icon-btn small" type="button" id="mini-toggle" title="Pause / lecture de la musique">⏯</button>
+      <button class="icon-btn small" type="button" id="mini-next" title="Autre musique de la même ambiance">⏭</button>
+      <button class="icon-btn small" type="button" id="mini-size" title="Réduire / agrandir">▭</button>
+      <button class="icon-btn small" type="button" id="mini-close" title="Arrêter la musique">✕</button>
+    </div>
+  </div>
+
+  <!-- Bibliothèque musicale -->
+  <aside class="drawer right" id="music" aria-label="Musiques d'ambiance" hidden>
+    <div class="drawer-head">
+      <h2>Musiques d'ambiance</h2>
+      <button class="icon-btn" data-close type="button" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="drawer-body">
+      <form id="ost-form" class="ost-form" autocomplete="off">
+        <input type="url" id="ost-url" placeholder="Lien YouTube d'une OST (youtube.com/watch?v=… ou youtu.be/…)" required spellcheck="false">
+        <p class="muted small">Choisis une ou plusieurs ambiances pour cette musique :</p>
+        <div class="tag-picker" id="ost-tags"></div>
+        <button class="btn primary" type="submit">Ajouter à la bibliothèque</button>
+      </form>
+
+      <h3>Lecture automatique</h3>
+      <label class="switch"><input type="checkbox" id="set-musicAuto"><span>Lancer une musique adaptée à l'ambiance de la scène</span></label>
+      <label class="switch"><input type="checkbox" id="set-musicFollowVoice"><span>Mettre la musique en pause quand la voix s'arrête</span></label>
+      <label class="slider"><span>Volume de la musique <output id="out-musicVolume"></output></span><input type="range" id="set-musicVolume" min="0" max="1" step="0.05"></label>
+
+      <h3>Couverture des ambiances</h3>
+      <div class="mood-coverage" id="mood-coverage"></div>
+
+      <h3>Ma bibliothèque <span id="ost-count" class="muted"></span></h3>
+      <div class="ost-list" id="ost-list"></div>
+      <p class="muted small">Astuce : sur YouTube, cherche par exemple « nom de l'anime OST sad » ou « emotional piano », copie le lien de la vidéo et colle-le ici. Certaines vidéos interdisent la lecture hors de YouTube : elles seront signalées et ignorées.</p>
     </div>
   </aside>
 

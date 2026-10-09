@@ -65,10 +65,19 @@ const FAKE_TTS = () => {
   Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
 };
 
+function silentWav(sec, rate = 8000) {
+  const n = Math.round(sec * rate);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  return buf;
+}
+
 let failures = 0;
 const check = (cond, msg) => { console.log(`${cond ? '✓' : '✗'} ${msg}`); if (!cond) failures++; };
 
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch({ executablePath: EXE, args: ['--autoplay-policy=no-user-gesture-required'] });
 
 async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, log = [] } = {}) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 });
@@ -78,6 +87,7 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
   page.on('console', m => { if (m.type() === 'error') console.log('  [console]', m.text()); });
   await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   await ctx.route('https://fonts.gstatic.com/**', r => r.abort());
+  await ctx.route('https://i.ytimg.com/**', r => r.abort());
   const html = fs.readFileSync(path.join(FIX, 'wp-chapter.html'), 'utf8');
   // Site de roman : sans en-tête CORS (comme la plupart des sites) sauf si cors=true
   await ctx.route('https://exemple-roman.test/**', r => {
@@ -98,6 +108,25 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
     return r.fulfill({ status: 200, contentType: 'text/html', headers: { 'Access-Control-Allow-Origin': '*' }, body });
   });
   for (const p of ['https://api.codetabs.com/**', 'https://corsproxy.io/**', 'https://cors.eu.org/**']) await ctx.route(p, r => r.abort());
+  // Faux lecteur YouTube (IFrame API) + oEmbed
+  await ctx.route('https://www.youtube.com/iframe_api', r => r.fulfill({ status: 200, contentType: 'text/javascript', body: `
+    window.__ytLoads = [];
+    window.YT = { PlayerState: { ENDED: 0, PLAYING: 1, PAUSED: 2 }, Player: class {
+      constructor(id, opts) { this.opts = opts; this.state = -1; this.vol = 100; window.__yt = this; setTimeout(() => opts.events.onReady({ target: this }), 10); }
+      loadVideoById(o) { this.vid = o.videoId; this.state = 1; window.__ytLoads.push(o.videoId); this.opts.events.onStateChange({ data: 1 }); }
+      playVideo() { this.state = 1; } pauseVideo() { this.state = 2; } stopVideo() { this.state = 5; }
+      setVolume(v) { this.vol = v; } getPlayerState() { return this.state; } getVideoData() { return { title: 'Titre ' + this.vid }; }
+    } };
+    window.onYouTubeIframeAPIReady && window.onYouTubeIframeAPIReady();` }));
+  await ctx.route('https://www.youtube.com/oembed**', r => {
+    const v = new URL(new URL(r.request().url()).searchParams.get('url')).searchParams.get('v');
+    return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ title: 'OST ' + v }) });
+  });
+  // Fausse API OpenAI : renvoie un vrai fichier audio (silence de 1,5 s)
+  await ctx.route('https://api.openai.com/**', async r => {
+    log.push('openai:' + r.request().postData());
+    return r.fulfill({ status: 200, contentType: 'audio/wav', headers: { 'Access-Control-Allow-Origin': '*' }, body: silentWav(1.5) });
+  });
   // API WordPress.com simulée
   await ctx.route('https://public-api.wordpress.com/**', r => {
     const u = r.request().url();
@@ -250,6 +279,79 @@ const CH2 = 'https://exemple-roman.test/2024/01/02/arc-i-chapitre-2/';
   await page.screenshot({ path: `${OUT}/07-mobile-voix.png` });
   const voiceOpt = await page.$eval('#set-voice', s => s.options[s.selectedIndex]?.textContent);
   check(/Denise/.test(voiceOpt), `voix naturelle choisie par défaut : ${voiceOpt}`);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 6. Fluidité, ambiance, musiques
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  // Bibliothèque musicale
+  await page.click('#btn-music');
+  await page.fill('#ost-url', 'https://www.youtube.com/watch?v=AAAAAAAAAAA');
+  await page.click('#ost-tags button:has-text("Calme")');
+  await page.click('#ost-form button[type=submit]');
+  await page.fill('#ost-url', 'https://youtu.be/BBBBBBBBBBB?t=1m5s');
+  await page.click('#ost-tags button:has-text("Mystère")');
+  await page.click('#ost-tags button:has-text("Tension")');
+  await page.click('#ost-form button[type=submit]');
+  await page.fill('#ost-url', 'pas un lien');
+  await page.click('#ost-tags button:has-text("Triste")');
+  await page.click('#ost-form button[type=submit]');
+  await page.waitForTimeout(400);
+  check(await page.locator('.ost-item').count() === 2, `bibliothèque musicale : 2 OST ajoutées, lien invalide refusé (${await page.locator('.ost-item').count()})`);
+  check((await page.textContent('#ost-list')).includes('OST AAAAAAAAAAA'), 'titre de la vidéo récupéré');
+  await page.screenshot({ path: `${OUT}/08-musiques.png` });
+  await page.click('#music [data-close]');
+
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.seg.current', { timeout: 15000 });
+  await page.waitForTimeout(1200);
+  const stats = await page.evaluate(() => ({ spoken: window.__spoken.filter(t => t.trim()).length, segs: document.querySelectorAll('.seg').length, first: window.__spoken.filter(t => t.trim())[1] }));
+  check(stats.spoken > 0 && stats.spoken < stats.segs, `enchaînement fluide : phrases regroupées (${stats.spoken} énoncés pour ${stats.segs} phrases)`);
+  const mood = await page.textContent('#mood-label');
+  check(!!mood && mood.length > 2, `ambiance détectée affichée : ${mood}`);
+  const loads = await page.evaluate(() => window.__ytLoads || []);
+  check(loads.length >= 1, `une OST se lance automatiquement avec la lecture (${loads.join(', ')})`);
+  check(await page.isVisible('#mini-player'), 'mini-lecteur de musique visible');
+  // Pause de la voix -> pause de la musique
+  await page.click('#btn-play');
+  await page.waitForTimeout(1000);
+  check(await page.evaluate(() => window.__yt.state) === 2, 'la musique se met en pause avec la voix');
+  // Forcer une ambiance
+  await page.click('#btn-mood');
+  await page.click('#mood-grid button:has-text("Calme")');
+  await page.waitForTimeout(2500);
+  check(await page.evaluate(() => window.__yt.vid) === 'AAAAAAAAAAA', 'ambiance forcée « Calme » → OST calme');
+  await page.screenshot({ path: `${OUT}/09-ambiance.png` });
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 7. Voix IA (OpenAI simulée)
+{
+  const log = [];
+  const { ctx, page } = await newPage(undefined, { cors: true, log });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ engine: 'openai', openaiKey: 'sk-test', showIntro: false })));
+  await page.reload();
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.waitForTimeout(2500);
+  const calls = log.filter(u => u.startsWith('openai:'));
+  check(calls.length >= 1, `voix IA : requêtes envoyées à OpenAI (${calls.length})`);
+  const body = JSON.parse(calls[0]?.slice(7) || '{}');
+  check(body.model === 'gpt-4o-mini-tts' && /Ambiance/.test(body.instructions || ''), 'voix IA : consignes d\'émotion selon l\'ambiance');
+  check(await page.evaluate(() => CSS.highlights.get('tts-word')?.size || 0) === 1, 'voix IA : mot en cours surligné');
+  check(await page.evaluate(() => document.querySelector('#btn-play use').getAttribute('href')) === '#i-pause', 'voix IA : lecture en cours');
+  // Réécoute : servie depuis le cache, sans nouvelle requête
+  const before = log.filter(u => u.startsWith('openai:')).length;
+  await page.click('#btn-play');
+  await page.click('.seg[data-i="0"]');
+  await page.waitForTimeout(800);
+  const after = log.filter(u => u.startsWith('openai:')).length;
+  check(after === before, `voix IA : réécoute depuis le cache, sans nouvel appel payant (${before} → ${after})`);
   await ctx.close();
 }
 
