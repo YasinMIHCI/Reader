@@ -1066,9 +1066,22 @@ function buildSettingsUI() {
   $('#voice-quick').addEventListener('change', onVoice);
   // Moteur de voix & voix IA
   $('#set-engine').addEventListener('change', e => setSettings({ engine: e.target.value }));
+  // Nettoie une clé collée (espaces, retours à la ligne, guillemets, préfixe « xi-api-key: »…)
+  const cleanKey = v => v.replace(/^\s*(xi-api-key|authorization|bearer)\s*[:=]?\s*/i, '').replace(/[\s"'`]/g, '');
   TEXT_KEYS.forEach(k => {
     const el = $('#set-' + k);
-    el?.addEventListener('change', () => setSettings({ [k]: el.value.trim() }));
+    if (!el) return;
+    const isKey = /Key$/.test(k);
+    let timer;
+    const save = () => {
+      const v = isKey ? cleanKey(el.value) : el.value.trim();
+      if (isKey) el.value = v;
+      if (v === (getSettings()[k] || '')) return;
+      setSettings({ [k]: v });
+      if (isKey && v) toast('Clé enregistrée ✓', { duration: 1800 });
+    };
+    el.addEventListener('change', save);
+    if (isKey) el.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(save, 700); });
   });
   fillSelect($('#set-openaiModel'), OPENAI_MODELS, getSettings().openaiModel);
   fillSelect($('#set-openaiVoice'), OPENAI_VOICES, getSettings().openaiVoice);
