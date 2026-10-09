@@ -220,6 +220,7 @@
       <div class="tabs" role="tablist">
         <button role="tab" type="button" data-tab="appearance" aria-selected="true">Apparence</button>
         <button role="tab" type="button" data-tab="voice">Voix</button>
+        <button role="tab" type="button" data-tab="account">Compte</button>
         <button role="tab" type="button" data-tab="advanced">Avancé</button>
       </div>
       <button class="icon-btn" data-close type="button" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
@@ -270,8 +271,12 @@
           <label class="field"><span>Clé API ElevenLabs</span><input type="password" id="set-elevenKey" placeholder="sk_…" autocomplete="off" spellcheck="false"></label>
           <label class="field"><span>Modèle</span><select id="set-elevenModel"></select></label>
           <label class="field"><span>Voix</span><select id="set-elevenVoice"></select></label>
-          <button class="btn small" type="button" id="eleven-load-voices">Charger mes voix ElevenLabs</button>
-          <p class="muted small">Synchronisation mot à mot exacte. Offre gratuite ≈ 10 000 caractères / mois (1 à 2 chapitres). Le modèle v3 reçoit des indications d'émotion selon la scène. La clé reste uniquement dans ce navigateur.</p>
+          <div class="row wrap">
+            <button class="btn small" type="button" id="eleven-load-voices">Charger mes voix</button>
+            <button class="btn small" type="button" id="eleven-quota-btn">Voir mes crédits</button>
+          </div>
+          <p class="small eleven-quota" id="eleven-quota"></p>
+          <p class="muted small">Synchronisation mot à mot exacte. Offre gratuite : 10 000 caractères / mois (1 à 2 chapitres) ; une fois épuisés, ElevenLabs refuse simplement les demandes (rien n'est facturé) et Re:Lecteur repasse automatiquement sur la voix de l'appareil. Le modèle v3 reçoit des indications d'émotion selon la scène. La clé reste uniquement dans ce navigateur.</p>
         </div>
 
         <div class="row wrap">
@@ -295,6 +300,30 @@
         <label class="switch"><input type="checkbox" id="set-autoNext"><span>Enchaîner automatiquement le chapitre suivant</span></label>
         <label class="switch"><input type="checkbox" id="set-prefetchNext"><span>Précharger le chapitre suivant pendant l'écoute</span></label>
         <label class="switch"><input type="checkbox" id="set-keepAwake"><span>Garder l'écran allumé pendant la lecture</span></label>
+      </div>
+
+      <div class="tab-panel" data-panel="account" hidden>
+        <h3>Compte &amp; sauvegarde en ligne</h3>
+        <p class="muted small">Sans compte, tes chapitres, ta progression et tes musiques restent déjà dans ce navigateur, même après l'avoir fermé. Avec un compte, ils sont aussi enregistrés dans <b>un fichier privé sur ton compte GitHub</b> (un « Gist » secret) : tu retrouves tout sur n'importe quel appareil, même si tu vides ton navigateur.</p>
+        <div id="sync-off">
+          <ol class="steps small">
+            <li>Ouvre <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Re%3ALecteur" target="_blank" rel="noopener">cette page GitHub</a> (connecte-toi si besoin).</li>
+            <li>Choisis une expiration (ex. « No expiration »), vérifie que seule la case <b>gist</b> est cochée, puis « Generate token ».</li>
+            <li>Copie le jeton (commence par <code>ghp_</code>) et colle-le ici :</li>
+          </ol>
+          <label class="field"><span>Jeton GitHub</span><input type="password" id="sync-token" placeholder="ghp_…" autocomplete="off" spellcheck="false"></label>
+          <button class="btn primary small" type="button" id="sync-connect">Se connecter</button>
+          <p class="muted small">Sur un autre appareil, colle le même jeton : ta bibliothèque y sera récupérée.</p>
+        </div>
+        <div id="sync-on" hidden>
+          <p>Connecté en tant que <b id="sync-user"></b></p>
+          <p class="sync-status small" id="sync-status"></p>
+          <div class="row wrap">
+            <button class="btn small" type="button" id="sync-now">Synchroniser maintenant</button>
+            <button class="btn small danger" type="button" id="sync-logout">Se déconnecter</button>
+          </div>
+          <p class="muted small">Synchronisation automatique : à l'ouverture du site, quelques secondes après chaque changement, et quand tu quittes la page. Les images ne sont pas envoyées (elles sont retéléchargées si besoin) ; tes clés de voix IA restent sur l'appareil.</p>
+        </div>
       </div>
 
       <div class="tab-panel" data-panel="advanced" hidden>

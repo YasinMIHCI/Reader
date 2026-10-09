@@ -111,7 +111,7 @@ export class MusicManager extends EventTarget {
   }
 
   async update(ost, patch) {
-    Object.assign(ost, patch);
+    Object.assign(ost, patch, { updatedAt: Date.now() });
     await db.saveOst(ost);
     this.emitChange();
   }
@@ -119,6 +119,7 @@ export class MusicManager extends EventTarget {
   async remove(ost) {
     this.tracks = this.tracks.filter(t => t.id !== ost.id);
     await db.deleteOst(ost.id);
+    this.dispatchEvent(new CustomEvent('deleted', { detail: ost.id }));
     if (this.current?.id === ost.id) this.stop();
     this.emitChange();
   }

@@ -452,6 +452,18 @@ body:not(.has-player) .mini-player { bottom: calc(16px + var(--safe-b)); }
 #set-engine { margin-bottom: .2rem; }
 .drawer select { color: var(--text); }
 
+.steps { padding-left: 1.2rem; margin: .4rem 0; display: grid; gap: .3rem; }
+.sync-status { display: flex; align-items: center; gap: .4rem; }
+.sync-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync-status.ok::before { background: #3ecf8e; }
+.sync-status.syncing::before { background: var(--accent); animation: pulse 1s infinite; }
+.sync-status.error::before { background: var(--danger); }
+.eleven-quota:empty { display: none; }
+.quota-bar { height: 6px; border-radius: 6px; background: var(--border); overflow: hidden; margin-top: .35rem; }
+.quota-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--danger)); }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; position: absolute; top: 9px; right: 9px; background: #3ecf8e; box-shadow: 0 0 6px #3ecf8e; }
+#btn-library { position: relative; }
+
 /* ---------- Chargement ---------- */
 .loading { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: viewIn .25s; }
 .loading-box { text-align: center; padding: 2rem; max-width: 90vw; }

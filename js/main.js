@@ -7,7 +7,8 @@ import { getSettings, setSettings, resetSettings, onSettingsChange, applyAppeara
 import { Speaker, loadVoices, sortedVoices, pickVoice, voiceLabel, ttsSupported } from './tts.js';
 import { ReaderView, fmtDuration } from './reader.js';
 import { playIntro } from './intro.js';
-import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices } from './neural.js';
+import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices, getElevenQuota } from './neural.js';
+import { SyncManager, recordDeletion } from './sync.js';
 import { analyzeChapter, MOODS, moodById, MOOD_PROSODY } from './mood.js';
 import { MusicManager } from './music.js';
 
@@ -37,7 +38,9 @@ const state = {
 
 // Deux moteurs : voix de l'appareil (Web Speech) ou voix IA (OpenAI / ElevenLabs)
 const engines = { browser: new Speaker(), neural: new AudioSpeaker() };
-const engineFor = (s = getSettings()) => (s.engine === 'browser' ? engines.browser : engines.neural);
+// engineFallback : crédits de voix IA épuisés -> voix de l'appareil jusqu'au prochain changement de réglage
+const engineFor = (s = getSettings()) => (s.engine === 'browser' || state.engineFallback ? engines.browser : engines.neural);
+const sync = new SyncManager();
 let speaker = engineFor();
 /** Écoute un événement du moteur actif uniquement. */
 function on(type, fn) {
@@ -219,6 +222,7 @@ async function fetchAndStore(url, { signal, onStep, keep } = {}) {
   };
   await db.saveChapter(chapter);
   state.knownIds.add(id);
+  sync.schedulePush();
   return chapter;
 }
 
@@ -498,7 +502,10 @@ function saveProgress(seg) {
   const pct = seg / Math.max(1, total - 1);
   ch.progress = { seg, pct };
   clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(() => db.updateChapter(ch.id, { progress: ch.progress, lastReadAt: Date.now() }), 800);
+  state.saveTimer = setTimeout(() => {
+    db.updateChapter(ch.id, { progress: ch.progress, lastReadAt: Date.now() });
+    sync.schedulePush(20000);
+  }, 800);
 }
 
 // ---------------------------------------------------------------------
@@ -656,6 +663,7 @@ function renderMoodChip() {
 
 function startPlayback() {
   if (!state.segments.length) return;
+  checkElevenBeforePlay();
   if (speaker.state === 'paused') {
     if (!reader.isCurrentVisible()) reader.refocus();
     speaker.play();
@@ -691,7 +699,19 @@ on('state', () => {
   handleWakeLock();
   if (speaker.state !== 'playing') updateFollowButton();
 });
-on('error', e => toast(e.detail.message, { type: 'error', duration: 7000 }));
+on('error', e => {
+  if (e.detail.code === 'quota' && speaker === engines.neural) {
+    state.engineFallback = true;
+    toast(`${e.detail.message} Je continue avec la voix de l'appareil (rien n'est facturé).`, {
+      type: 'error', duration: 9000,
+      action: { label: 'Mes crédits', fn: () => { showDrawer('settings'); selectTab('voice'); showElevenQuota(); } },
+    });
+    rebuildItems();
+    if (state.chapter) playSeg(Math.max(0, state.currentSeg));
+    return;
+  }
+  toast(e.detail.message, { type: 'error', duration: 7000 });
+});
 on('end', () => {
   const ch = state.chapter;
   if (!ch) return;
@@ -781,6 +801,8 @@ async function handleWakeLock() {
 }
 document.addEventListener('visibilitychange', () => {
   handleWakeLock();
+  if (document.visibilityState === 'hidden') sync.flush();
+  else if (sync.enabled && Date.now() - (getSettings().lastSyncAt || 0) > 120000) sync.syncNow();
   if (document.visibilityState === 'hidden' && state.chapter) {
     db.updateChapter(state.chapter.id, { progress: state.chapter.progress, lastReadAt: Date.now() });
   }
@@ -951,6 +973,8 @@ async function renderLibrary() {
       del.onclick = async () => {
         if (!confirm(`Supprimer « ${c.title} » de la bibliothèque ?`)) return;
         await db.deleteChapter(c.id);
+        recordDeletion('chapters', c.id);
+        sync.schedulePush(2000);
         state.knownIds.delete(c.id);
         renderLibrary();
         if (state.chapter?.id === c.id) goHome();
@@ -1061,6 +1085,7 @@ function buildSettingsUI() {
       toast(`${voices.length} voix chargées.`);
     } catch (err) { toast(err.message, { type: 'error' }); }
   });
+  $('#eleven-quota-btn').addEventListener('click', () => showElevenQuota());
   $('#audio-cache-clear').addEventListener('click', async () => {
     await db.clearAudio();
     toast('Cache audio vidé.');
@@ -1130,6 +1155,7 @@ onSettingsChange((s, patch) => {
     if ('voiceURI' in patch) fillVoiceSelects();
     if (state.chapter) updateProgressUI(Math.max(0, state.currentSeg));
   }
+  if (['engine', 'openaiKey', 'elevenKey', 'elevenModel', 'openaiModel'].some(k => k in patch)) state.engineFallback = false;
   if ('engine' in patch || 'fluid' in patch || 'expressiveness' in patch
     || (s.engine !== 'browser' && ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'].some(k => k in patch))) {
     rebuildItems();
@@ -1150,6 +1176,103 @@ onSettingsChange((s, patch) => {
     state.relayout = setTimeout(() => { reader.lastLineTop = null; reader.updateMarker(false); }, 120);
   }
 });
+
+// =====================================================================
+// Compte (synchronisation) & crédits ElevenLabs
+// =====================================================================
+
+function renderSync() {
+  const s = getSettings();
+  const on = sync.enabled;
+  $('#sync-off').hidden = on;
+  $('#sync-on').hidden = !on;
+  $('#sync-user').textContent = s.syncUser || '';
+  const st = $('#sync-status');
+  st.className = 'sync-status small ' + sync.status;
+  st.textContent = sync.status === 'syncing' ? 'Synchronisation…'
+    : sync.status === 'error' ? `Erreur : ${sync.lastError}`
+      : s.lastSyncAt ? `Synchronisé ${relativeDate(s.lastSyncAt)}` : 'Pas encore synchronisé';
+  let dot = $('#btn-library .sync-dot');
+  if (on && !dot) { dot = document.createElement('span'); dot.className = 'sync-dot'; $('#btn-library').append(dot); }
+  if (!on && dot) dot.remove();
+  if (dot) dot.style.background = sync.status === 'error' ? 'var(--danger)' : '';
+}
+
+async function refreshAfterPull() {
+  await music?.reload();
+  if (!$('#view-home').hidden) renderHome();
+  if (openDrawer?.id === 'library') renderLibrary();
+  toast('Bibliothèque synchronisée ☁️', { duration: 2500 });
+}
+
+function setupSync() {
+  sync.addEventListener('status', renderSync);
+  sync.addEventListener('pulled', refreshAfterPull);
+  $('#sync-connect').addEventListener('click', async () => {
+    const token = $('#sync-token').value.trim();
+    if (!token) { toast('Colle ton jeton GitHub.', { type: 'error' }); return; }
+    const btn = $('#sync-connect');
+    btn.disabled = true;
+    try {
+      const login = await sync.connect(token);
+      $('#sync-token').value = '';
+      toast(`Connecté en tant que ${login} ✓ Ta bibliothèque est sauvegardée en ligne.`);
+    } catch (e) { toast(e.message, { type: 'error', duration: 8000 }); }
+    btn.disabled = false;
+    renderSync();
+  });
+  $('#sync-now').addEventListener('click', () => sync.syncNow());
+  $('#sync-logout').addEventListener('click', () => {
+    if (!confirm('Se déconnecter ? Ta bibliothèque reste sur cet appareil et dans ton fichier GitHub.')) return;
+    sync.disconnect();
+    renderSync();
+  });
+  renderSync();
+  setInterval(renderSync, 60000);
+  if (sync.enabled) sync.syncNow();
+}
+
+function chapterCharsLeft() {
+  if (!state.items.length) return 0;
+  let n = 0;
+  for (let i = Math.max(0, speaker.index); i < state.items.length; i++) n += state.items[i].text.length;
+  return n;
+}
+
+async function showElevenQuota() {
+  const box = $('#eleven-quota');
+  const key = getSettings().elevenKey || $('#set-elevenKey').value.trim();
+  if (!key) { box.textContent = "Ajoute d'abord ta clé API."; return null; }
+  box.textContent = 'Vérification…';
+  try {
+    const q = await getElevenQuota(key);
+    const left = Math.max(0, q.limit - q.used);
+    const pct = q.limit ? Math.min(100, (q.used / q.limit) * 100) : 0;
+    const need = state.chapter ? chapterCharsLeft() : 0;
+    box.innerHTML = `<b>${left.toLocaleString('fr-FR')}</b> caractères restants sur ${q.limit.toLocaleString('fr-FR')}`
+      + (q.reset ? ` · remise à zéro le ${new Date(q.reset).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` : '')
+      + (need ? `<br>Reste de ce chapitre : ≈ ${need.toLocaleString('fr-FR')} caractères${need > left ? ' — ⚠️ pas assez : la fin sera lue avec la voix de l\'appareil' : ''}` : '')
+      + `<div class="quota-bar"><i style="width:${pct}%"></i></div>`;
+    return { ...q, left };
+  } catch (e) {
+    box.textContent = /permission|missing/i.test(e.message) ? 'Ta clé n\'a pas la permission « User → Read » : active-la pour voir les crédits.' : e.message;
+    return null;
+  }
+}
+
+// Avertit une fois par chapitre si les crédits ElevenLabs ne suffiront pas
+let quotaWarnedFor = null;
+async function checkElevenBeforePlay() {
+  const s = getSettings();
+  if (s.engine !== 'elevenlabs' || state.engineFallback || !state.chapter || quotaWarnedFor === state.chapter.id) return;
+  quotaWarnedFor = state.chapter.id;
+  try {
+    const q = await getElevenQuota(s.elevenKey);
+    const left = Math.max(0, q.limit - q.used);
+    const need = chapterCharsLeft();
+    if (need > left) toast(`ElevenLabs : il te reste ${left.toLocaleString('fr-FR')} caractères, ce chapitre en demande ≈ ${need.toLocaleString('fr-FR')}. Quand ce sera épuisé, je continuerai avec la voix de l'appareil (rien n'est facturé).`, { duration: 9000 });
+  } catch { /* clé sans permission de lecture : on ignore */ }
+}
 
 // =====================================================================
 // Musiques d'ambiance
@@ -1261,6 +1384,8 @@ function setupMusic() {
     if (music.current) $('#mini-title').textContent = music.current.title || 'Musique';
   });
   music.addEventListener('mood', () => renderMoodChip());
+  music.addEventListener('change', () => sync.schedulePush());
+  music.addEventListener('deleted', e => { recordDeletion('osts', e.detail); sync.schedulePush(2000); });
   $('#mini-player').classList.toggle('small', !!getSettings().miniPlayerSmall);
 
   $('#ost-form').addEventListener('submit', async e => {
@@ -1345,6 +1470,7 @@ function bindEvents() {
       const id = 'local:' + Date.now().toString(36);
       const ch = { id, url: null, ...data, nav: {}, index: [], navChecked: true, addedAt: Date.now(), lastReadAt: Date.now(), progress: { seg: 0, pct: 0 } };
       await db.saveChapter(ch);
+      sync.schedulePush();
       $('#paste-text').value = '';
       $('#paste-title').value = '';
       navigateToChapter(id, { autoplay: true });
@@ -1378,6 +1504,7 @@ function bindEvents() {
       const n = await db.importLibrary(JSON.parse(await f.text()));
       toast(`${n} chapitre(s) importé(s).`);
       music?.reload();
+      sync.schedulePush(2000);
       renderLibrary();
       renderHome();
     } catch (err) { toast(err.message, { type: 'error' }); }
@@ -1385,7 +1512,9 @@ function bindEvents() {
   });
   $('#lib-clear').addEventListener('click', async () => {
     if (!confirm('Effacer toute la bibliothèque (chapitres et images) ?')) return;
+    (await db.listChapters()).forEach(c => recordDeletion('chapters', c.id));
     await db.clearAll();
+    sync.schedulePush(2000);
     state.knownIds.clear();
     renderLibrary();
     goHome();
@@ -1481,6 +1610,7 @@ async function boot() {
   syncSettingsUI();
   bindEvents();
   setupMusic();
+  setupSync();
   registerSW();
 
   loadVoices().then(() => { fillVoiceSelects(); configureVoice(); });

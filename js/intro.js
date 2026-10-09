@@ -455,7 +455,7 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     if (appear <= 0) return;
     const out = seg(t, 4.4, 5);
     const alpha = appear * (1 - out);
-    const F = Math.min(H * 0.3, W * 0.4);          // taille de la silhouette
+    const F = Math.min(H * 0.34, W * 0.44);          // taille de la silhouette
     const L = F * 0.48;                              // longueur d'une jambe
     const L1 = L * 0.52; const L2 = L * 0.48;
     const sw = L * 0.42; const sh = sw * 0.62;        // giron / hauteur de marche
@@ -541,57 +541,196 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     const T = F * 0.3;
     const sho = [hip[0] + Math.sin(lean) * T, hip[1] - Math.cos(lean) * T];
 
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#020006';
-    ctx.fillStyle = '#020006';
-    ctx.shadowColor = 'rgba(168,232,255,0.8)'; ctx.shadowBlur = 12;
-
-    const limb = (from, to, l1, l2, bendForward, w) => {
+    // ---- Personnage (original) : formes vectorielles + liseré de contre-jour
+    const ankleOf = f => [f[0], f[1] - F * 0.035];
+    const footScr = feet.map(f => toScreen(f.p[0], f.p[1]));
+    const ik = (from, to, l1, l2) => {
       let dx = to[0] - from[0]; let dy = to[1] - from[1];
       let d = Math.hypot(dx, dy);
       const maxD = (l1 + l2) * 0.999;
       if (d > maxD) { dx *= maxD / d; dy *= maxD / d; d = maxD; }
       const base = Math.atan2(dy, dx);
       const a = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
-      const ang = bendForward ? base - a : base + a;
-      const knee = [from[0] + Math.cos(ang) * l1, from[1] + Math.sin(ang) * l1];
-      const end = [from[0] + dx, from[1] + dy];
-      ctx.lineWidth = w;
-      ctx.beginPath(); ctx.moveTo(from[0], from[1]); ctx.lineTo(knee[0], knee[1]); ctx.lineTo(end[0], end[1]); ctx.stroke();
-      return end;
+      const ang = base - a; // genou vers l'avant
+      return { knee: [from[0] + Math.cos(ang) * l1, from[1] + Math.sin(ang) * l1], end: [from[0] + dx, from[1] + dy] };
+    };
+    // Tracé effilé le long d'une polyligne (membres)
+    const taper = (c, pts, ws) => {
+      const n = pts.length; const L_ = []; const R_ = [];
+      for (let i = 0; i < n; i++) {
+        const a = pts[Math.max(0, i - 1)]; const b = pts[Math.min(n - 1, i + 1)];
+        let nx = -(b[1] - a[1]); let ny = b[0] - a[0];
+        const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+        L_.push([pts[i][0] + nx * ws[i] / 2, pts[i][1] + ny * ws[i] / 2]);
+        R_.push([pts[i][0] - nx * ws[i] / 2, pts[i][1] - ny * ws[i] / 2]);
+      }
+      c.moveTo(L_[0][0], L_[0][1]);
+      for (let i = 1; i < n; i++) {
+        const m = i < n - 1 ? [(L_[i][0] + L_[i + 1][0]) / 2, (L_[i][1] + L_[i + 1][1]) / 2] : L_[i];
+        c.quadraticCurveTo(L_[i][0], L_[i][1], m[0], m[1]);
+      }
+      c.arc(pts[n - 1][0], pts[n - 1][1], ws[n - 1] / 2, Math.atan2(L_[n - 1][1] - pts[n - 1][1], L_[n - 1][0] - pts[n - 1][0]), Math.atan2(R_[n - 1][1] - pts[n - 1][1], R_[n - 1][0] - pts[n - 1][0]));
+      for (let i = n - 2; i >= 0; i--) {
+        const m = i > 0 ? [(R_[i][0] + R_[i - 1][0]) / 2, (R_[i][1] + R_[i - 1][1]) / 2] : R_[i];
+        c.quadraticCurveTo(R_[i][0], R_[i][1], m[0], m[1]);
+      }
+      c.arc(pts[0][0], pts[0][1], ws[0] / 2, Math.atan2(R_[0][1] - pts[0][1], R_[0][0] - pts[0][0]), Math.atan2(L_[0][1] - pts[0][1], L_[0][0] - pts[0][0]));
+      c.closePath();
+    };
+    const boot = (c, f, lift) => {
+      const tilt = -lift * 0.35;
+      const pt = (x, y) => [f[0] + x * Math.cos(tilt) - y * Math.sin(tilt), f[1] + x * Math.sin(tilt) + y * Math.cos(tilt)];
+      const P = [pt(-F * 0.032, 0), pt(F * 0.062, 0), pt(F * 0.078, -F * 0.012), pt(F * 0.07, -F * 0.03), pt(F * 0.02, -F * 0.045), pt(-F * 0.025, -F * 0.06), pt(-F * 0.036, -F * 0.03)];
+      c.moveTo(P[0][0], P[0][1]);
+      for (let i = 1; i < P.length; i++) {
+        const nx = P[(i + 1) % P.length];
+        c.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + nx[0]) / 2, (P[i][1] + nx[1]) / 2);
+      }
+      c.closePath();
+    };
+    const legPath = (c, idx) => {
+      const ft = footScr[idx];
+      const r = ik(hip, ankleOf(ft), L1, L2);
+      taper(c, [hip, r.knee, r.end], [F * 0.085, F * 0.06, F * 0.042]);
+      boot(c, ft, feet[idx].moving);
+    };
+    const u = [Math.sin(lean), -Math.cos(lean)];          // axe du buste (vers le haut)
+    const nrm = [-u[1], u[0]];                              // vers l'avant
+    const at = (o, a, b) => [o[0] + u[0] * a + nrm[0] * b, o[1] + u[1] * a + nrm[1] * b];
+    const swingA = s * Math.PI;
+    const armPts = phase => {
+      const ang = Math.PI / 2 + lean * 0.5 + Math.sin(phase) * 0.6;
+      const sh0 = at(sho, -F * 0.015, 0);
+      const elbow = [sh0[0] + Math.cos(ang) * F * 0.16, sh0[1] + Math.sin(ang) * F * 0.16];
+      const fa = ang - 0.35 - Math.max(0, Math.sin(phase)) * 0.75;
+      const wrist = [elbow[0] + Math.cos(fa) * F * 0.145, elbow[1] + Math.sin(fa) * F * 0.145];
+      const fist = [wrist[0] + Math.cos(fa) * F * 0.022, wrist[1] + Math.sin(fa) * F * 0.022];
+      return { pts: [sh0, elbow, wrist], fist };
+    };
+    const armPath = (c, phase) => {
+      const a = armPts(phase);
+      taper(c, a.pts, [F * 0.062, F * 0.05, F * 0.046]);
+      c.moveTo(a.fist[0] + F * 0.026, a.fist[1]);
+      c.arc(a.fist[0], a.fist[1], F * 0.026, 0, TAU);
+    };
+    const flut = k => Math.sin(t * 9 + k) * F * 0.018;
+    const coatPath = c => {
+      const P = [
+        at(sho, F * 0.02, -F * 0.055),          // épaule arrière
+        at(sho, F * 0.03, F * 0.02),            // haut de l'épaule
+        at(sho, -F * 0.04, F * 0.07),           // poitrine
+        at(hip, F * 0.06, F * 0.055),           // taille avant
+        at(hip, -F * 0.15, F * 0.07),           // bas avant
+        at(hip, -F * 0.2, -F * 0.02),           // bas milieu
+        [at(hip, -F * 0.25, -F * 0.17)[0] + flut(0), at(hip, -F * 0.25, -F * 0.17)[1]],   // pan arrière (pointe)
+        at(hip, -F * 0.08, -F * 0.085),
+        at(hip, F * 0.08, -F * 0.06),           // dos
+      ];
+      c.moveTo((P[0][0] + P[8][0]) / 2, (P[0][1] + P[8][1]) / 2);
+      for (let i = 0; i < P.length; i++) {
+        const nx = P[(i + 1) % P.length];
+        if (i === 6 || i === 4) c.lineTo(P[i][0], P[i][1]); // pointes nettes
+        else c.quadraticCurveTo(P[i][0], P[i][1], (P[i][0] + nx[0]) / 2, (P[i][1] + nx[1]) / 2);
+      }
+      c.closePath();
+      // col montant
+      const n0 = at(sho, F * 0.01, -F * 0.03);
+      c.moveTo(n0[0], n0[1]);
+      const c1 = at(sho, F * 0.085, -F * 0.05); const c2 = at(sho, F * 0.06, F * 0.02);
+      c.lineTo(c1[0], c1[1]); c.lineTo(c2[0], c2[1]); c.closePath();
+    };
+    // Tête (profil vers la droite), légèrement baissée : détermination
+    const nod = 0.18 + Math.sin(s * Math.PI * 2) * 0.03;
+    const headC = at(sho, F * 0.125, F * 0.035);
+    const r = F * 0.074;
+    const H2S = (x, y) => {
+      const ca = Math.cos(nod); const sa = Math.sin(nod);
+      return [headC[0] + x * ca - y * sa, headC[1] + x * sa + y * ca];
+    };
+    const headPath = c => {
+      const seq = [[-0.95, 0.15], [-1.05, -0.55], [-0.45, -1.05], [0.35, -1.05], [0.88, -0.55], [0.95, -0.12], [1.13, 0.17], [0.98, 0.3], [1.0, 0.46], [0.93, 0.62], [0.62, 0.86], [0.15, 0.8], [-0.2, 0.55], [-0.45, 0.95], [-0.8, 0.9]];
+      const pts = seq.map(([x, y]) => H2S(x * r, y * r));
+      c.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) {
+        if ([6, 7, 8].includes(i)) c.lineTo(pts[i][0], pts[i][1]); // nez / lèvres nets
+        else { const nx = pts[(i + 1) % pts.length]; c.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + nx[0]) / 2, (pts[i][1] + nx[1]) / 2); }
+      }
+      c.closePath();
+      // Cheveux : mèches en pointes, ébouriffées par le vent
+      const spikes = [
+        [0.72, -0.72, 1.18, -0.08, 0.3], [0.48, -0.95, 1.08, -0.42, 0.32], [0.78, -0.42, 0.98, 0.18, 0.2],
+        [0.12, -1.06, -0.25, -1.62, 0.36], [-0.22, -1.06, -0.85, -1.55, 0.38], [-0.55, -0.96, -1.38, -1.32, 0.38],
+        [-0.84, -0.72, -1.78, -0.92, 0.36], [-1.0, -0.38, -1.9, -0.36, 0.34], [-0.98, -0.02, -1.66, 0.22, 0.3],
+        [-0.82, 0.3, -1.24, 0.72, 0.24],
+      ];
+      spikes.forEach(([bx, by, tx, ty, w], i) => {
+        const sway = Math.sin(t * 7 + i * 1.3) * 0.06;
+        const b0 = H2S((bx - w * 0.5) * r, (by + w * 0.35) * r);
+        const b1 = H2S((bx + w * 0.5) * r, (by - w * 0.35) * r);
+        const tip = H2S((tx - Math.abs(sway) * 0.6) * r, (ty + sway) * r);
+        const mid = H2S(((bx + tx) / 2) * r, ((by + ty) / 2 - 0.08) * r);
+        c.moveTo(b0[0], b0[1]);
+        c.quadraticCurveTo(mid[0], mid[1], tip[0], tip[1]);
+        c.quadraticCurveTo(mid[0], mid[1] + r * 0.12, b1[0], b1[1]);
+        c.closePath();
+      });
+      const cap = H2S(-0.15 * r, -0.45 * r);
+      c.moveTo(cap[0] + r * 0.95, cap[1]);
+      c.ellipse(cap[0], cap[1], r * 0.98, r * 0.66, nod, 0, TAU);
+      // cou
+      const nk0 = at(sho, F * 0.01, -F * 0.012); const nk1 = H2S(-0.1 * r, 0.75 * r);
+      taper(c, [nk0, nk1], [F * 0.045, F * 0.04]);
+    };
+    // Écharpe rouge qui flotte derrière
+    const scarfPts = () => {
+      const base = at(sho, F * 0.035, -F * 0.01);
+      const pts = [];
+      for (let k = 0; k <= 9; k++) {
+        const f = k / 9;
+        pts.push([base[0] - f * F * 0.5 - Math.sin(f * 2) * F * 0.02,
+          base[1] + f * F * 0.12 + Math.sin(t * 10 - k * 0.9) * F * 0.035 * f]);
+      }
+      return pts;
+    };
+    const scarfPath = c => {
+      const pts = scarfPts();
+      taper(c, pts, pts.map((_, k) => F * (0.05 - k * 0.0035)));
     };
 
-    // Jambe arrière puis bras arrière (plus sombres), corps, puis membres avant
-    const legW = F * 0.075; const armW = F * 0.05;
-    const swing = s * Math.PI;
-    const drawArm = phase => {
-      const ang = Math.PI / 2 + lean * 0.6 + Math.sin(phase) * 0.55;
-      const elbow = [sho[0] + Math.cos(ang) * F * 0.17, sho[1] + Math.sin(ang) * F * 0.17];
-      const fa = ang - 0.5 - Math.max(0, Math.sin(phase)) * 0.6;
-      const hand = [elbow[0] + Math.cos(fa) * F * 0.16, elbow[1] + Math.sin(fa) * F * 0.16];
-      ctx.lineWidth = armW;
-      ctx.beginPath(); ctx.moveTo(sho[0], sho[1]); ctx.lineTo(elbow[0], elbow[1]); ctx.lineTo(hand[0], hand[1]); ctx.stroke();
-    };
     const back = feet[0].p[0] < feet[1].p[0] ? 0 : 1;
     const front = 1 - back;
-    ctx.globalAlpha = alpha * 0.85;
-    const fb = feet[back].p; limb(hip, toScreen(fb[0], fb[1]), L1, L2, true, legW);
-    drawArm(swing);
+    const rimOff = Math.max(1.2, F / 110);
+    const group = (paths, fill, rimAlpha) => {
+      // 1) silhouette décalée vers la lune, en couleur de liseré ; 2) silhouette sombre par-dessus
+      ctx.save();
+      ctx.translate(rimOff, -rimOff);
+      ctx.fillStyle = `rgba(200,236,255,${rimAlpha})`;
+      ctx.shadowColor = 'rgba(168,232,255,0.7)'; ctx.shadowBlur = 5;
+      ctx.beginPath(); paths.forEach(p => p(ctx)); ctx.fill('nonzero');
+      ctx.restore();
+      ctx.fillStyle = fill;
+      ctx.beginPath(); paths.forEach(p => p(ctx)); ctx.fill('nonzero');
+    };
     ctx.globalAlpha = alpha;
-    // pan de manteau qui flotte
-    ctx.beginPath();
-    ctx.moveTo(sho[0] - F * 0.03, sho[1] + F * 0.05);
-    ctx.lineTo(hip[0] - F * 0.06 - Math.sin(t * 9) * F * 0.02, hip[1] + F * 0.12);
-    ctx.lineTo(hip[0] + F * 0.05, hip[1] + F * 0.03);
-    ctx.closePath(); ctx.fill();
-    // torse
-    ctx.lineWidth = F * 0.12;
-    ctx.beginPath(); ctx.moveTo(hip[0], hip[1]); ctx.lineTo(sho[0], sho[1]); ctx.stroke();
-    // tête (légèrement baissée, déterminée)
-    const head = [sho[0] + Math.sin(lean + 0.25) * F * 0.11, sho[1] - Math.cos(lean + 0.25) * F * 0.11];
-    ctx.beginPath(); ctx.arc(head[0], head[1], F * 0.068, 0, TAU); ctx.fill();
-    const ff = feet[front].p; limb(hip, toScreen(ff[0], ff[1]), L1, L2, true, legW);
-    drawArm(swing + Math.PI);
+    group([c => legPath(c, back), c => armPath(c, swingA)], '#0c0919', 0.55);
+    // écharpe : liseré + rouge sombre
+    ctx.save(); ctx.translate(rimOff, -rimOff); ctx.fillStyle = 'rgba(255,120,150,0.7)'; ctx.beginPath(); scarfPath(ctx); ctx.fill(); ctx.restore();
+    ctx.fillStyle = '#4a0a1d'; ctx.beginPath(); scarfPath(ctx); ctx.fill();
+    group([coatPath, headPath, c => legPath(c, front)], '#04020a', 0.95);
+    group([c => armPath(c, swingA + Math.PI)], '#05030c', 0.95);
+    // Œil : une lueur qui laisse une traînée
+    const eye = H2S(0.6 * r, -0.12 * r);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const trail = ctx.createLinearGradient(eye[0], eye[1], eye[0] - r * 0.9, eye[1] - r * 0.35);
+    trail.addColorStop(0, 'rgba(255,60,100,0.6)'); trail.addColorStop(1, 'rgba(255,60,100,0)');
+    ctx.strokeStyle = trail; ctx.lineWidth = r * 0.05; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(eye[0], eye[1]);
+    ctx.quadraticCurveTo(eye[0] - r * 0.45, eye[1] - r * 0.12 + Math.sin(t * 8) * r * 0.05, eye[0] - r * 0.9, eye[1] - r * 0.35);
+    ctx.stroke();
+    ctx.fillStyle = '#ffd0dc'; ctx.shadowColor = C.crimson; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.ellipse(eye[0], eye[1], r * 0.1, r * 0.05, nod - 0.15, 0, TAU); ctx.fill();
+    ctx.restore();
     ctx.restore();
   }
 
@@ -711,7 +850,9 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     // en mouvement réduit : on montre directement la scène finale
-    const t = reducedMotion ? 3.9 + (ms / total) * 1.1 : ms / 1000;
+    // window.__introFreeze (secondes) fige l'animation : utilisé par les tests visuels
+    const frozen = typeof window.__introFreeze === 'number';
+    const t = frozen ? window.__introFreeze : reducedMotion ? 3.9 + (ms / total) * 1.1 : ms / 1000;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // petite secousse au moment du battement
@@ -731,7 +872,7 @@ export function playIntro({ container, onDone, reducedMotion = false } = {}) {
     drawFlash(t);
     ctx.restore();
 
-    if (ms >= total) { finish(); return; }
+    if (ms >= total && !frozen) { finish(); return; }
     raf = requestAnimationFrame(frame);
   }
 
