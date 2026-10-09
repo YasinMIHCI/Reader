@@ -142,6 +142,14 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
   });
   await ctx.route('https://api.elevenlabs.io/**', r => {
     log.push('eleven:' + r.request().url());
+    if (r.request().headers()['xi-api-key'] === 'sk_lib') {
+      const url = r.request().url();
+      const ok = o => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify(o) });
+      if (url.endsWith('/v1/voices')) return ok({ voices: [{ voice_id: 'paidvoice', name: 'Voix Payante', category: 'professional' }, { voice_id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', category: 'premade' }] });
+      if (url.includes('/paidvoice/')) return r.fulfill({ status: 402, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'payment_required', message: 'Free users cannot use library voices via the API. Add $5 of credits or upgrade to Starter to use this voice.' } }) });
+      const text = r.request().postDataJSON().text;
+      return ok({ audio_base64: silentWav(1.2).toString('base64'), alignment: { characters: [...text], character_start_times_seconds: [...text].map((_, i) => i * 1.1 / text.length) } });
+    }
     if (r.request().headers()['xi-api-key'] === 'sk_noperm') return r.fulfill({ status: 401, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'missing_permissions', message: 'The API key you used is missing the permission text_to_speech to execute this operation.' } }) });
     if (r.request().url().includes('/user/subscription')) return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ character_count: 9990, character_limit: 10000, next_character_count_reset_unix: 1893456000 }) });
     return r.fulfill({ status: 401, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } }) });
@@ -470,6 +478,24 @@ const CH2 = 'https://exemple-roman.test/2024/01/02/arc-i-chapitre-2/';
   await page.click('#voice-test');
   await page.waitForTimeout(800);
   check((await page.textContent('#toasts')).includes('permission « Text to Speech »'), 'permission manquante expliquée clairement');
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 10. ElevenLabs : voix payante en offre gratuite -> voix gratuite
+{
+  const log = [];
+  const { ctx, page } = await newPage(undefined, { cors: true, log });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ engine: 'elevenlabs', elevenKey: 'sk_lib', elevenVoice: 'paidvoice', showIntro: false })));
+  await page.reload();
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.waitForTimeout(3000);
+  check((await page.textContent('#toasts')).includes('réservée aux comptes payants'), 'voix payante détectée et expliquée');
+  check(await page.evaluate(() => JSON.parse(localStorage.getItem('relecteur.settings.v1')).elevenVoice) === 'JBFqnCBsd6RMkjVDRZzb', 'bascule automatique sur une voix gratuite (George)');
+  check(log.some(u => u.includes('/JBFqnCBsd6RMkjVDRZzb/')), 'la lecture reprend avec la voix gratuite');
+  check(await page.evaluate(() => CSS.highlights.get('tts-word')?.size || 0) === 1, 'ElevenLabs : mot en cours surligné (horodatage exact)');
   await ctx.close();
 }
 

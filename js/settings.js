@@ -43,7 +43,7 @@ export const DEFAULTS = {
   openaiVoice: 'coral',
   elevenKey: '',
   elevenModel: 'eleven_multilingual_v2',
-  elevenVoice: '21m00Tcm4TlvDq8ikWAM',
+  elevenVoice: 'JBFqnCBsd6RMkjVDRZzb',
   rate: 1,
   pitch: 1,
   volume: 1,
@@ -82,6 +82,8 @@ export function getSettings() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { /* ignore */ }
   cache = { ...DEFAULTS, ...saved };
+  // Rachel / Adam ne sont plus utilisables en offre gratuite ElevenLabs
+  if (['21m00Tcm4TlvDq8ikWAM', 'pNInz6obpgDQGcFmaJgB'].includes(cache.elevenVoice)) cache.elevenVoice = DEFAULTS.elevenVoice;
   return cache;
 }
 
