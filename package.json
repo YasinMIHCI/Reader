@@ -1,0 +1,15 @@
+{
+  "name": "relecteur",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Re:Lecteur — extrait le texte d'un chapitre de roman en ligne et le lit à voix haute en suivant chaque mot.",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve -l 8080 .",
+    "test": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.1"
+  },
+  "license": "MIT"
+}

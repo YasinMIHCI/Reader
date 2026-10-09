@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="75%">
+      <stop offset="0" stop-color="#3a1a6b"/>
+      <stop offset=".6" stop-color="#170c2b"/>
+      <stop offset="1" stop-color="#07040f"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3eaff"/>
+      <stop offset="1" stop-color="#a77bff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g filter="url(#glow)" transform="translate(256 262)">
+    <circle r="168" fill="none" stroke="url(#ring)" stroke-width="14"/>
+    <circle r="138" fill="none" stroke="#c9a8ff" stroke-width="4" opacity=".55"/>
+    <g stroke="#e3c07a" stroke-width="10" stroke-linecap="round">
+      <line x1="0" y1="-150" x2="0" y2="-124"/><line x1="150" y1="0" x2="124" y2="0"/>
+      <line x1="0" y1="150" x2="0" y2="124"/><line x1="-150" y1="0" x2="-124" y2="0"/>
+    </g>
+    <path d="M0 0V-100M0 0l-62 40" stroke="#e3c07a" stroke-width="16" stroke-linecap="round" fill="none"/>
+    <path d="M-40 -150 a160 160 0 0 0 -110 110" fill="none" stroke="#ff2d5f" stroke-width="10" stroke-linecap="round"/>
+    <path d="M-150 -40 l-12 -30 l32 8" fill="none" stroke="#ff2d5f" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle r="16" fill="#ff2d5f"/>
+  </g>
+</svg>

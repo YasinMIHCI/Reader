@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="fr" data-theme="nuit-sorciere">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Re:Lecteur</title>
+  <meta name="description" content="Colle l'URL d'un chapitre de roman : Re:Lecteur extrait le texte, le met en page comme tu veux et te le lit à voix haute en suivant chaque mot.">
+  <meta name="theme-color" content="#120c1f">
+  <meta name="color-scheme" content="dark light">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Re:Lecteur">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></symbol>
+      <symbol id="i-fwd" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 17l5-5-5-5M6 17l5-5-5-5"/></symbol>
+      <symbol id="i-skip-prev" viewBox="0 0 24 24"><path fill="currentColor" d="M6 5h2v14H6zM20 6.2v11.6a.8.8 0 0 1-1.25.66L10.4 12.66a.8.8 0 0 1 0-1.32l8.35-5.8A.8.8 0 0 1 20 6.2z"/></symbol>
+      <symbol id="i-skip-next" viewBox="0 0 24 24"><path fill="currentColor" d="M16 5h2v14h-2zM4 6.2v11.6a.8.8 0 0 0 1.25.66l8.35-5.8a.8.8 0 0 0 0-1.32L5.25 5.54A.8.8 0 0 0 4 6.2z"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+      <symbol id="i-text" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 19l5-14 5 14M5.8 14h6.4M15 19l3-8 3 8M15.9 16.5h4.2"/></symbol>
+      <symbol id="i-voice" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-paste" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9z"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12l7 7 7-7"/></symbol>
+      <symbol id="i-logo" viewBox="0 0 64 64">
+        <circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="3"/>
+        <circle cx="32" cy="32" r="21.5" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".55"/>
+        <path d="M32 32V16M32 32l-9 6" stroke="var(--accent-2, #e3c07a)" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+        <circle cx="32" cy="32" r="3" fill="var(--danger, #ff2d5f)"/>
+        <path d="M14 10l3 3M50 10l-3 3M32 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <a class="skip-to" href="#main">Aller au contenu</a>
+
+  <header class="topbar" id="topbar">
+    <button class="brand" id="brand" type="button" title="Accueil">
+      <svg class="brand-logo"><use href="#i-logo"/></svg>
+      <span class="brand-name"><b>Re</b><i>:</i>Lecteur</span>
+    </button>
+    <div class="topbar-title" id="topbar-title"></div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="btn-new" type="button" title="Nouveau chapitre" aria-label="Nouveau chapitre"><svg><use href="#i-plus"/></svg></button>
+      <button class="icon-btn" id="btn-library" type="button" title="Bibliothèque (B)" aria-label="Bibliothèque"><svg><use href="#i-book"/></svg></button>
+      <button class="icon-btn" id="btn-appearance" type="button" title="Apparence (A)" aria-label="Apparence"><svg><use href="#i-text"/></svg></button>
+      <button class="icon-btn" id="btn-settings" type="button" title="Voix & réglages (R)" aria-label="Réglages"><svg><use href="#i-gear"/></svg></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Accueil -->
+    <section id="view-home" class="view home">
+      <div class="hero">
+        <div class="hero-clock" aria-hidden="true"><svg><use href="#i-logo"/></svg></div>
+        <h1 class="hero-title"><span class="re">Re</span><span class="colon">:</span>Lecteur</h1>
+        <p class="hero-sub">Colle l'adresse d'un chapitre. Je récupère uniquement le texte du roman, je le mets en page comme tu l'aimes… et je te le lis.</p>
+
+        <form id="url-form" class="url-form" autocomplete="off">
+          <label class="sr-only" for="url-input">URL du chapitre</label>
+          <div class="url-field">
+            <input id="url-input" type="url" inputmode="url" placeholder="https://… (lien d'un chapitre)" required spellcheck="false">
+            <button type="button" class="icon-btn subtle" id="btn-paste" title="Coller depuis le presse-papiers" aria-label="Coller"><svg><use href="#i-paste"/></svg></button>
+          </div>
+          <button class="btn primary big" type="submit"><svg><use href="#i-play"/></svg><span>Charger &amp; écouter</span></button>
+        </form>
+        <button type="button" class="link-btn" id="btn-example">Essayer avec l'exemple Re:Zero (Arc VII, chapitre 1)</button>
+      </div>
+
+      <div class="home-grid">
+        <section class="card" id="resume-card" hidden>
+          <h2>Reprendre</h2>
+          <div id="resume-body"></div>
+        </section>
+
+        <section class="card" id="recent-card" hidden>
+          <div class="card-head">
+            <h2>Chapitres en mémoire</h2>
+            <button class="link-btn" type="button" id="btn-see-library">Tout voir</button>
+          </div>
+          <ul class="recent-list" id="recent-list"></ul>
+        </section>
+
+        <details class="card paste-card">
+          <summary><h2>Le site bloque&nbsp;? Colle le texte</h2></summary>
+          <form id="paste-form" class="paste-form">
+            <input id="paste-title" type="text" placeholder="Titre (facultatif)">
+            <textarea id="paste-text" rows="6" placeholder="Colle ici le texte (ou le HTML) du chapitre…" required></textarea>
+            <button class="btn" type="submit">Mettre en page &amp; lire</button>
+          </form>
+        </details>
+
+        <section class="card tips" id="voice-tips">
+          <h2>Pour une voix vraiment naturelle</h2>
+          <ul>
+            <li><b>PC :</b> ouvre le site avec <b>Microsoft Edge</b> : il propose les voix neuronales « Denise », « Henri », « Vivienne »… (marquées ★).</li>
+            <li><b>Android :</b> Chrome + « Services Google pour la synthèse vocale » ; télécharge la voix française haute qualité dans les réglages du téléphone.</li>
+            <li><b>iPhone / iPad :</b> Réglages → Accessibilité → Contenu énoncé → Voix → Français : télécharge une voix « Premium » ou « Améliorée ».</li>
+          </ul>
+          <p class="muted" id="voice-status"></p>
+        </section>
+      </div>
+    </section>
+
+    <!-- Lecteur -->
+    <section id="view-reader" class="view reader-view" hidden>
+      <div id="reader" class="reader"></div>
+    </section>
+  </main>
+
+  <button id="follow-btn" class="follow-btn" type="button" hidden><svg><use href="#i-down"/></svg><span>Suivre la voix</span></button>
+
+  <!-- Lecteur audio -->
+  <div id="player" class="player" hidden>
+    <div class="player-progress">
+      <span class="time" id="time-pct">0 %</span>
+      <input type="range" id="progress" min="0" max="100" value="0" step="1" aria-label="Position dans le chapitre">
+      <span class="time" id="time-left">–</span>
+    </div>
+    <div class="player-controls">
+      <button class="icon-btn small" id="btn-sleep" type="button" title="Minuterie de sommeil" aria-label="Minuterie de sommeil"><svg><use href="#i-moon"/></svg><span class="sleep-label" id="sleep-label"></span></button>
+      <button class="icon-btn hide-sm" id="btn-prev-chap" type="button" title="Chapitre précédent (P)" aria-label="Chapitre précédent"><svg><use href="#i-skip-prev"/></svg></button>
+      <button class="icon-btn" id="btn-prev" type="button" title="Phrase précédente (←)" aria-label="Phrase précédente"><svg><use href="#i-back"/></svg></button>
+      <button class="play-btn" id="btn-play" type="button" title="Lecture / pause (Espace)" aria-label="Lecture"><svg><use href="#i-play"/></svg></button>
+      <button class="icon-btn" id="btn-next" type="button" title="Phrase suivante (→)" aria-label="Phrase suivante"><svg><use href="#i-fwd"/></svg></button>
+      <button class="icon-btn hide-sm" id="btn-next-chap" type="button" title="Chapitre suivant (N)" aria-label="Chapitre suivant"><svg><use href="#i-skip-next"/></svg></button>
+      <button class="speed-btn" id="btn-speed" type="button" title="Vitesse (+ / −)" aria-label="Vitesse">1×</button>
+    </div>
+    <div class="speed-pop" id="speed-pop" hidden>
+      <div class="speed-row">
+        <button type="button" class="icon-btn small" data-speed-step="-0.05">−</button>
+        <input type="range" id="speed-range" min="0.5" max="2.5" step="0.05" value="1" aria-label="Vitesse de lecture">
+        <button type="button" class="icon-btn small" data-speed-step="0.05">+</button>
+      </div>
+      <div class="speed-presets">
+        <button type="button" data-speed="0.8">0,8</button><button type="button" data-speed="1">1</button><button type="button" data-speed="1.15">1,15</button><button type="button" data-speed="1.3">1,3</button><button type="button" data-speed="1.5">1,5</button><button type="button" data-speed="1.75">1,75</button><button type="button" data-speed="2">2</button>
+      </div>
+      <div class="voice-quick">
+        <label for="voice-quick">Voix</label>
+        <select id="voice-quick"></select>
+      </div>
+    </div>
+    <div class="sleep-pop" id="sleep-pop" hidden>
+      <p>Arrêter la lecture…</p>
+      <div class="speed-presets">
+        <button type="button" data-sleep="0">Jamais</button><button type="button" data-sleep="10">10 min</button><button type="button" data-sleep="20">20 min</button><button type="button" data-sleep="30">30 min</button><button type="button" data-sleep="60">1 h</button><button type="button" data-sleep="chapter">Fin du chapitre</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chargement -->
+  <div id="loading" class="loading" hidden role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="loading-clock" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width="2.5"/><line class="h" x1="32" y1="32" x2="32" y2="18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><line class="m" x1="32" y1="32" x2="32" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="32" r="2.6" fill="currentColor"/></svg>
+      </div>
+      <p class="loading-title" id="loading-title">Récupération du chapitre…</p>
+      <p class="loading-step" id="loading-step"></p>
+      <button class="btn ghost" id="loading-cancel" type="button">Annuler</button>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+
+  <!-- Bibliothèque -->
+  <aside class="drawer left" id="library" aria-label="Bibliothèque" hidden>
+    <div class="drawer-head">
+      <h2>Bibliothèque</h2>
+      <button class="icon-btn" data-close type="button" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="drawer-body">
+      <input type="search" id="lib-search" placeholder="Rechercher un chapitre…" aria-label="Rechercher">
+      <p class="muted small">Les chapitres ouverts restent ici, avec leurs images : ils se rouvrent instantanément, sans réseau.</p>
+      <div id="lib-list" class="lib-list"></div>
+    </div>
+    <div class="drawer-foot">
+      <p class="muted small" id="lib-usage"></p>
+      <div class="row wrap">
+        <button class="btn small" id="lib-export" type="button">Exporter</button>
+        <label class="btn small" for="lib-import-file">Importer</label>
+        <input type="file" id="lib-import-file" accept="application/json,.json" hidden>
+        <button class="btn small danger" id="lib-clear" type="button">Tout effacer</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Réglages -->
+  <aside class="drawer right" id="settings" aria-label="Réglages" hidden>
+    <div class="drawer-head">
+      <div class="tabs" role="tablist">
+        <button role="tab" type="button" data-tab="appearance" aria-selected="true">Apparence</button>
+        <button role="tab" type="button" data-tab="voice">Voix</button>
+        <button role="tab" type="button" data-tab="advanced">Avancé</button>
+      </div>
+      <button class="icon-btn" data-close type="button" aria-label="Fermer"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="drawer-body">
+      <div class="tab-panel" data-panel="appearance">
+        <h3>Thème</h3>
+        <div class="theme-grid" id="theme-grid"></div>
+
+        <h3>Police</h3>
+        <select id="set-font"></select>
+        <div class="preview" id="font-preview">Le vent glacé soufflait sur les pavés de la capitale et, quelque part, une vieille horloge s'était remise à tourner à l'envers.</div>
+
+        <label class="slider"><span>Taille du texte <output id="out-fontSize"></output></span><input type="range" id="set-fontSize" min="14" max="34" step="1"></label>
+        <label class="slider"><span>Interligne <output id="out-lineHeight"></output></span><input type="range" id="set-lineHeight" min="1.3" max="2.3" step="0.05"></label>
+        <label class="slider"><span>Largeur du texte <output id="out-width"></output></span><input type="range" id="set-width" min="24" max="60" step="1"></label>
+        <label class="slider"><span>Espace entre paragraphes <output id="out-paraSpacing"></output></span><input type="range" id="set-paraSpacing" min="0.3" max="2" step="0.1"></label>
+        <div class="seg-control" role="radiogroup" aria-label="Alignement">
+          <button type="button" data-align="left">Aligné à gauche</button>
+          <button type="button" data-align="justify">Justifié</button>
+        </div>
+        <label class="switch"><input type="checkbox" id="set-indent"><span>Alinéa en début de paragraphe</span></label>
+      </div>
+
+      <div class="tab-panel" data-panel="voice" hidden>
+        <h3>Voix</h3>
+        <select id="set-voice"></select>
+        <div class="row">
+          <button class="btn small" id="voice-test" type="button"><svg><use href="#i-play"/></svg>Tester</button>
+          <span class="muted small" id="voice-count"></span>
+        </div>
+        <label class="slider"><span>Vitesse <output id="out-rate"></output></span><input type="range" id="set-rate" min="0.5" max="2.5" step="0.05"></label>
+        <label class="slider"><span>Hauteur <output id="out-pitch"></output></span><input type="range" id="set-pitch" min="0.5" max="1.5" step="0.05"></label>
+        <label class="slider"><span>Volume <output id="out-volume"></output></span><input type="range" id="set-volume" min="0" max="1" step="0.05"></label>
+
+        <h3>Suivi visuel</h3>
+        <label class="switch"><input type="checkbox" id="set-highlightWord"><span>Surligner le mot lu</span></label>
+        <label class="switch"><input type="checkbox" id="set-highlightSentence"><span>Surligner la phrase lue</span></label>
+        <label class="switch"><input type="checkbox" id="set-focusMode"><span>Mode concentration (assombrit le reste)</span></label>
+        <label class="switch"><input type="checkbox" id="set-autoScroll"><span>Défilement automatique avec la voix</span></label>
+        <label class="slider"><span>Hauteur de la ligne lue à l'écran <output id="out-scrollAnchor"></output></span><input type="range" id="set-scrollAnchor" min="0.15" max="0.6" step="0.01"></label>
+
+        <h3>Lecture</h3>
+        <label class="switch"><input type="checkbox" id="set-readTitle"><span>Lire le titre du chapitre</span></label>
+        <label class="switch"><input type="checkbox" id="set-autoNext"><span>Enchaîner automatiquement le chapitre suivant</span></label>
+        <label class="switch"><input type="checkbox" id="set-prefetchNext"><span>Précharger le chapitre suivant pendant l'écoute</span></label>
+        <label class="switch"><input type="checkbox" id="set-keepAwake"><span>Garder l'écran allumé pendant la lecture</span></label>
+      </div>
+
+      <div class="tab-panel" data-panel="advanced" hidden>
+        <h3>Intro</h3>
+        <label class="switch"><input type="checkbox" id="set-showIntro"><span>Afficher l'intro animée au lancement</span></label>
+        <button class="btn small" id="btn-replay-intro" type="button">Revoir l'intro</button>
+
+        <h3>Images</h3>
+        <label class="switch"><input type="checkbox" id="set-downloadImages"><span>Télécharger les images du chapitre (disponibles hors ligne)</span></label>
+
+        <h3>Proxy personnel</h3>
+        <p class="muted small">Pour les sites qui bloquent les requêtes (CORS). Les sites WordPress.com fonctionnent sans proxy. Les proxys publics sont essayés automatiquement, mais un proxy perso (Cloudflare Worker gratuit, voir le dossier <code>proxy/</code> du dépôt) est bien plus fiable.</p>
+        <input type="url" id="set-customProxy" placeholder="https://mon-proxy.workers.dev/?url={url}" spellcheck="false">
+
+        <h3>Marque-page magique</h3>
+        <p class="muted small">Glisse ce lien dans ta barre de favoris : sur n'importe quel chapitre, clique dessus pour l'ouvrir dans Re:Lecteur.</p>
+        <a class="btn small bookmarklet" id="bookmarklet" href="#">📖 Lire avec Re:Lecteur</a>
+
+        <h3>Raccourcis clavier</h3>
+        <ul class="kbd-list">
+          <li><kbd>Espace</kbd> lecture / pause</li>
+          <li><kbd>←</kbd> <kbd>→</kbd> phrase précédente / suivante</li>
+          <li><kbd>Maj</kbd>+<kbd>←</kbd> <kbd>→</kbd> paragraphe précédent / suivant</li>
+          <li><kbd>+</kbd> <kbd>−</kbd> vitesse</li>
+          <li><kbd>N</kbd> / <kbd>P</kbd> chapitre suivant / précédent</li>
+          <li><kbd>F</kbd> suivre la voix · <kbd>B</kbd> bibliothèque · <kbd>A</kbd> apparence</li>
+        </ul>
+
+        <h3>Données</h3>
+        <button class="btn small" id="btn-reset-settings" type="button">Réinitialiser les réglages</button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <dialog id="lightbox" class="lightbox">
+    <img alt="">
+    <button class="icon-btn" type="button" aria-label="Fermer" data-close-lightbox><svg><use href="#i-close"/></svg></button>
+  </dialog>
+
+  <script src="vendor/Readability.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
