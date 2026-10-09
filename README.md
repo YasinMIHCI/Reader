@@ -18,11 +18,12 @@ Site 100 % statique (HTML/CSS/JS, aucune compilation) : il s'héberge gratuiteme
 | 🎭 **Voix IA (option)** | Avec ta propre clé API : **OpenAI** (reçoit des consignes de jeu selon la scène : triste, action, romantique…) ou **ElevenLabs** (ultra-réaliste, synchronisation mot à mot exacte). Le passage suivant est préparé à l'avance (pas de blanc) et les audios sont mis en cache : une réécoute ne coûte rien. |
 | 🎵 **Musiques d'ambiance** | Bibliothèque d'OST à partir de liens YouTube, avec des tags (calme, joyeux, romantique, triste, tension, action, épique, mystère, effrayant). Re:Lecteur **analyse le texte en direct** pour comprendre l'ambiance de la scène et lance la musique qui va avec, en fondu enchaîné. Pause avec la voix, volume réglable, ambiance forçable à la main. |
 | 🎯 **Suivi visuel** | Phrase en cours surlignée, mot en cours surligné, petit marqueur lumineux animé dans la marge qui suit la ligne lue, et défilement automatique fluide. Si tu fais défiler toi-même, un bouton « Suivre la voix » apparaît. Clique sur n'importe quelle phrase pour lire à partir de là. |
+| ☁️ **Compte & sauvegarde** | Optionnel : connecte un compte GitHub (jeton « gist ») et ta bibliothèque — chapitres, progression, musiques — est enregistrée dans un fichier privé sur ton compte. Tu fermes tout, changes d'appareil, et tu reprends exactement où tu en étais. |
 | 📚 **Bibliothèque** | Chaque chapitre ouvert est gardé en mémoire (IndexedDB) avec sa position de lecture : il se rouvre instantanément, **sans aucune nouvelle requête**. Recherche, suppression, export/import (pour passer d'un appareil à l'autre). |
 | ⏭️ **Enchaînement** | Détection des liens « précédent / sommaire / suivant ». Le chapitre suivant est préchargé pendant l'écoute et lancé automatiquement à la fin. Les pages de sommaire sont détectées et affichées sous forme de liste. |
 | 🎨 **Apparence** | 6 thèmes (Sorcière, Givre, Manoir, Clair, Sépia, Nuit OLED), 10 polices, taille, interligne, largeur, espacement, justification, alinéa, mode concentration. |
 | 🌙 **Confort** | Minuterie de sommeil (10 min → fin du chapitre), vitesse de 0,5× à 2,5×, écran maintenu allumé pendant la lecture, contrôles depuis l'écran verrouillé / le casque. |
-| 🎬 **Intro animée** | Une animation de 5 secondes au lancement : horloge qui remonte le temps, ombres, éclats, puis une silhouette anonyme qui gravit un long escalier à contre-jour de la lune (vue de côté) — désactivable dans Réglages → Avancé. Dessinée entièrement en code, sans aucune image officielle. |
+| 🎬 **Intro animée** | Une animation de 5 secondes au lancement : horloge qui remonte le temps, ombres, éclats, puis un personnage original (long manteau, écharpe rouge au vent, cheveux en bataille, regard lumineux) qui gravit un long escalier à contre-jour de la lune, en vue de côté — désactivable dans Réglages → Avancé. Dessinée entièrement en code, sans aucune image officielle. |
 | 📱 **PC & mobile** | Interface responsive, panneaux en « bottom sheet » sur téléphone, installable comme une application (PWA), fonctionne hors ligne, partage de lien depuis Android directement vers l'appli. |
 
 ## Mettre le site en ligne (GitHub Pages)
@@ -54,6 +55,20 @@ Réglages → Voix → **Moteur de voix** :
 - **ElevenLabs** : crée une clé sur elevenlabs.io (Profile → API keys). Offre gratuite ≈ 10 000 caractères/mois. Bouton « Charger mes voix » pour choisir parmi tes voix.
 
 La clé n'est stockée que dans ton navigateur et n'est envoyée qu'au service choisi.
+
+## Compte & sauvegarde en ligne
+
+Sans compte, tout reste déjà dans le navigateur (même après l'avoir fermé). Pour ne jamais rien perdre et retrouver ta bibliothèque partout :
+
+1. Réglages → **Compte** → ouvre le lien « cette page GitHub » (crée un compte GitHub gratuit si besoin).
+2. Laisse uniquement la case **gist** cochée → *Generate token* → copie le jeton `ghp_…`.
+3. Colle-le dans Re:Lecteur → **Se connecter**. Sur un autre appareil, colle le même jeton.
+
+Ta base de données est un Gist **secret** nommé « Re:Lecteur — bibliothèque » sur ton compte. La synchronisation est automatique (à l'ouverture, après chaque changement, en quittant la page) ; la progression la plus récente gagne et les suppressions se propagent. Les images et les clés de voix IA ne sont pas envoyées.
+
+## Crédits ElevenLabs
+
+En offre gratuite (10 000 caractères/mois), quand les crédits sont épuisés, ElevenLabs **refuse** simplement la demande : rien n'est facturé. Re:Lecteur le détecte et **continue automatiquement avec la voix de l'appareil**, au même endroit. Le bouton « Voir mes crédits » (Réglages → Voix) affiche le solde, la date de remise à zéro et ce que demande le reste du chapitre ; un avertissement apparaît au lancement si le solde ne suffit pas. Les passages déjà générés sont en cache : les réécouter ne consomme rien.
 
 ## Musiques d'ambiance (OST)
 
@@ -111,6 +126,7 @@ js/tts.js               moteur de lecture (Web Speech API, suivi mot à mot, pro
 js/neural.js            voix IA OpenAI / ElevenLabs (cache, préchargement, synchronisation)
 js/mood.js              analyse de l'ambiance du texte (lexique + ponctuation, lissage par scène)
 js/music.js             bibliothèque d'OST YouTube + lecteur + choix selon l'ambiance
+js/sync.js              compte : sauvegarde / synchronisation via un Gist GitHub privé
 js/reader.js            rendu, surlignage, marqueur de voix, défilement automatique
 js/intro.js             intro animée de 5 s (canvas)
 js/db.js                stockage local (IndexedDB) + export/import

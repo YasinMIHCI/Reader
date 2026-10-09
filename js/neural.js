@@ -40,8 +40,23 @@ async function sha(text) {
 }
 
 async function apiError(res, provider) {
-  let msg = '';
-  try { const j = await res.json(); msg = j.error?.message || j.detail?.message || j.detail?.status || (typeof j.detail === 'string' ? j.detail : '') || ''; } catch { /* ignore */ }
+  let msg = ''; let status = '';
+  try {
+    const j = await res.json();
+    status = j.detail?.status || j.error?.code || '';
+    msg = j.error?.message || j.detail?.message || (typeof j.detail === 'string' ? j.detail : '') || '';
+  } catch { /* ignore */ }
+  // Crédits épuisés : ElevenLabs refuse la demande (aucune facturation automatique en offre gratuite)
+  if (status === 'quota_exceeded' || /quota/i.test(msg) || status === 'insufficient_quota') {
+    const e = new Error(`${provider} : crédits du mois épuisés.`);
+    e.code = 'quota';
+    return e;
+  }
+  if (status === 'detected_unusual_activity') {
+    const e = new Error(`${provider} : offre gratuite bloquée (activité inhabituelle détectée, souvent à cause d'un VPN).`);
+    e.code = 'quota';
+    return e;
+  }
   if (res.status === 401) return new Error(`${provider} : clé API invalide ou manquante.`);
   if (res.status === 429) return new Error(`${provider} : quota atteint ou trop de requêtes. ${msg}`.trim());
   if (res.status === 402) return new Error(`${provider} : crédit insuffisant. ${msg}`.trim());
@@ -98,6 +113,14 @@ async function synthEleven(item, s, signal) {
     alignment = al.character_start_times_seconds.slice(skip);
   }
   return { blob: new Blob([bytes], { type: 'audio/mpeg' }), alignment };
+}
+
+/** Crédits ElevenLabs : caractères utilisés / limite du mois, date de remise à zéro. */
+export async function getElevenQuota(key) {
+  const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': key } });
+  if (!res.ok) throw await apiError(res, 'ElevenLabs');
+  const d = await res.json();
+  return { used: d.character_count || 0, limit: d.character_limit || 0, reset: d.next_character_count_reset_unix ? d.next_character_count_reset_unix * 1000 : null, tier: d.tier || '' };
 }
 
 export async function listElevenVoices(key) {
@@ -230,7 +253,7 @@ export class AudioSpeaker extends EventTarget {
       if (gen !== this.gen) return;
       this.emit('loading', false);
       this.setState('paused');
-      this.emit('error', { message: e.message || String(e) });
+      this.emit('error', { message: e.message || String(e), code: e.code });
       return;
     }
     if (gen !== this.gen) return;

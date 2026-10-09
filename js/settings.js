@@ -64,6 +64,12 @@ export const DEFAULTS = {
   musicFollowVoice: true, // pause de la musique quand la voix s'arrête
   miniPlayerSmall: false,
 
+  // Synchronisation (compte GitHub)
+  syncToken: '',
+  syncGistId: '',
+  syncUser: '',
+  lastSyncAt: 0,
+
   showIntro: true,
   customProxy: '',
 };

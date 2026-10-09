@@ -75,6 +75,7 @@ function silentWav(sec, rate = 8000) {
 }
 
 let failures = 0;
+const GH = { gist: null, writes: 0 };
 const check = (cond, msg) => { console.log(`${cond ? '✓' : '✗'} ${msg}`); if (!cond) failures++; };
 
 const browser = await chromium.launch({ executablePath: EXE, args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -126,6 +127,23 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
   await ctx.route('https://api.openai.com/**', async r => {
     log.push('openai:' + r.request().postData());
     return r.fulfill({ status: 200, contentType: 'audio/wav', headers: { 'Access-Control-Allow-Origin': '*' }, body: silentWav(1.5) });
+  });
+  // Faux GitHub (Gist) : l'état est partagé entre les « appareils » du test
+  await ctx.route('https://api.github.com/**', async r => {
+    const req = r.request(); const u = new URL(req.url());
+    const json = (o, st = 200) => r.fulfill({ status: st, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify(o) });
+    if (req.headers().authorization !== 'Bearer ghp_test') return json({ message: 'Bad credentials' }, 401);
+    if (u.pathname === '/user') return json({ login: 'lecteur-test' });
+    if (u.pathname === '/gists' && req.method() === 'GET') return json(GH.gist ? [{ id: 'g1', description: GH.gist.description }] : []);
+    if (u.pathname === '/gists' && req.method() === 'POST') { const b = req.postDataJSON(); GH.gist = { description: b.description, files: {} }; Object.entries(b.files).forEach(([n, f]) => { GH.gist.files[n] = f.content; }); return json({ id: 'g1' }, 201); }
+    if (u.pathname === '/gists/g1' && req.method() === 'PATCH') { GH.writes++; const b = req.postDataJSON(); Object.entries(b.files).forEach(([n, f]) => { if (f === null) delete GH.gist.files[n]; else GH.gist.files[n] = f.content; }); return json({ id: 'g1' }); }
+    if (u.pathname === '/gists/g1') return json({ id: 'g1', files: Object.fromEntries(Object.entries(GH.gist.files).map(([n, c]) => [n, { filename: n, content: c, truncated: false }])) });
+    return json({ message: 'Not Found' }, 404);
+  });
+  await ctx.route('https://api.elevenlabs.io/**', r => {
+    log.push('eleven:' + r.request().url());
+    if (r.request().url().includes('/user/subscription')) return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ character_count: 9990, character_limit: 10000, next_character_count_reset_unix: 1893456000 }) });
+    return r.fulfill({ status: 401, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ detail: { status: 'quota_exceeded', message: 'This request exceeds your quota of 10000.' } }) });
   });
   // API WordPress.com simulée
   await ctx.route('https://public-api.wordpress.com/**', r => {
@@ -352,6 +370,98 @@ const CH2 = 'https://exemple-roman.test/2024/01/02/arc-i-chapitre-2/';
   await page.waitForTimeout(800);
   const after = log.filter(u => u.startsWith('openai:')).length;
   check(after === before, `voix IA : réécoute depuis le cache, sans nouvel appel payant (${before} → ${after})`);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 8. Compte : sauvegarde en ligne + autre appareil
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.seg.current', { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  await page.click('#btn-play'); // pause
+  await page.click('#btn-music');
+  await page.fill('#ost-url', 'https://youtu.be/CCCCCCCCCCC');
+  await page.click('#ost-tags button:has-text("Triste")');
+  await page.click('#ost-form button[type=submit]');
+  await page.waitForTimeout(300);
+  await page.click('#music [data-close]');
+  await page.click('#btn-settings');
+  await page.click('[data-tab="account"]');
+  await page.fill('#sync-token', 'ghp_mauvais');
+  await page.click('#sync-connect');
+  await page.waitForTimeout(500);
+  check((await page.textContent('#toasts')).includes('Jeton GitHub invalide'), 'compte : mauvais jeton refusé');
+  await page.fill('#sync-token', 'ghp_test');
+  await page.click('#sync-connect');
+  await page.waitForSelector('#sync-on:not([hidden])', { timeout: 8000 });
+  await page.waitForTimeout(800);
+  check((await page.textContent('#sync-user')) === 'lecteur-test', 'compte : connecté');
+  check(!!GH.gist && Object.keys(GH.gist.files).some(n => n.startsWith('relecteur.json')), `compte : fichier de sauvegarde créé (${Object.keys(GH.gist?.files || {}).join(', ')})`);
+  const savedPct = await page.evaluate(async () => { const { listChapters } = await import('./js/db.js'); return (await listChapters())[0].progress.seg; });
+  await page.screenshot({ path: `${OUT}/10-compte.png` });
+  await ctx.close();
+
+  // Nouvel appareil (navigateur vierge) : on colle le même jeton -> tout revient
+  const second = await newPage({ width: 390, height: 844 }, { cors: true });
+  await second.page.goto(BASE + '?nointro');
+  check(await second.page.locator('#recent-list .chap-item, #resume-body .chap-item').count() === 0, 'autre appareil : bibliothèque vide au départ');
+  await second.page.click('#btn-settings');
+  await second.page.click('[data-tab="account"]');
+  await second.page.fill('#sync-token', 'ghp_test');
+  await second.page.click('#sync-connect');
+  await second.page.waitForSelector('#sync-on:not([hidden])', { timeout: 8000 });
+  await second.page.waitForTimeout(1200);
+  const remote = await second.page.evaluate(async () => {
+    const db = await import('./js/db.js');
+    const ch = await db.listChapters(); const os = await db.listOsts();
+    return { n: ch.length, title: ch[0]?.title, seg: ch[0]?.progress?.seg, osts: os.map(o => o.videoId) };
+  });
+  check(remote.n === 1 && remote.title.includes('La lanterne'), 'autre appareil : chapitre récupéré');
+  check(remote.seg === savedPct && savedPct > 0, `autre appareil : progression récupérée (phrase ${remote.seg})`);
+  check(remote.osts.includes('CCCCCCCCCCC'), 'autre appareil : musiques récupérées');
+  await second.page.click('#settings [data-close]');
+  await second.page.click('#btn-library');
+  await second.page.waitForSelector('#lib-list .chap-item');
+  check(await second.page.locator('#btn-library .sync-dot').count() === 1, 'indicateur de synchronisation visible');
+  // suppression sur l'appareil 2 -> propagée
+  second.page.once('dialog', d => d.accept());
+  await second.page.click('#lib-list .lib-row .icon-btn');
+  await second.page.waitForTimeout(400);
+  await second.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await second.page.evaluate(async () => { const m = await import('./js/sync.js'); });
+  await second.page.waitForTimeout(3500);
+  const remoteData = await second.page.evaluate(async () => {
+    const db = await import('./js/db.js');
+    return (await db.listChapters()).length;
+  });
+  check(remoteData === 0, 'suppression locale appliquée');
+  await second.ctx.close();
+}
+
+// ---------------------------------------------------------------- 9. ElevenLabs : crédits épuisés -> voix de l'appareil
+{
+  const log = [];
+  const { ctx, page } = await newPage(undefined, { cors: true, log });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ engine: 'elevenlabs', elevenKey: 'sk_test', showIntro: false })));
+  await page.reload();
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.waitForTimeout(2500);
+  check(log.some(u => u.startsWith('eleven:') && u.includes('text-to-speech')), 'ElevenLabs : demande envoyée');
+  check((await page.textContent('#toasts')).includes('crédits du mois épuisés'), 'ElevenLabs : crédits épuisés détectés');
+  check(await page.evaluate(() => window.__spoken.filter(t => t.trim()).length) > 0, 'ElevenLabs épuisé → la lecture continue avec la voix de l\'appareil');
+  check(await page.evaluate(() => document.querySelector('#btn-play use').getAttribute('href')) === '#i-pause', 'la lecture ne s\'arrête pas');
+  await page.click('#btn-settings');
+  await page.click('[data-tab="voice"]');
+  await page.click('#eleven-quota-btn');
+  await page.waitForTimeout(500);
+  check((await page.textContent('#eleven-quota')).includes('10 caractères restants'), `crédits affichés : ${(await page.textContent('#eleven-quota')).slice(0, 60)}`);
+  await page.screenshot({ path: `${OUT}/11-credits.png` });
   await ctx.close();
 }
 

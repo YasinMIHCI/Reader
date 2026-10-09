@@ -128,6 +128,39 @@ export async function requestPersistence() {
   return false;
 }
 
+/** Applique un état fusionné (synchronisation). Renvoie true si quelque chose a changé ici. */
+export async function replaceAll({ chapters = [], osts = [], deleteChapters = [], deleteOsts = [] }) {
+  const stamp = c => Math.max(c.lastReadAt || 0, c.updatedAt || 0, c.addedAt || 0);
+  let changed = false;
+  await tx(['chapters', 'images', 'osts'], 'readwrite', async t => {
+    const cs = t.objectStore('chapters');
+    const os = t.objectStore('osts');
+    for (const c of chapters) {
+      const cur = await reqP(cs.get(c.id));
+      if (!cur || stamp(c) > stamp(cur)) { cs.put(c); changed = true; }
+    }
+    for (const id of deleteChapters) {
+      const cur = await reqP(cs.get(id));
+      if (cur && !chapters.some(c => c.id === id)) {
+        cs.delete(id);
+        const keys = await reqP(t.objectStore('images').index('chapterId').getAllKeys(IDBKeyRange.only(id)));
+        keys.forEach(k => t.objectStore('images').delete(k));
+        changed = true;
+      }
+    }
+    const ostStamp = o => Math.max(o.updatedAt || 0, o.addedAt || 0);
+    for (const o of osts) {
+      const cur = await reqP(os.get(o.id));
+      if (!cur || ostStamp(o) > ostStamp(cur)) { os.put(o); changed = true; }
+    }
+    for (const id of deleteOsts) {
+      const cur = await reqP(os.get(id));
+      if (cur && !osts.some(o => o.id === id)) { os.delete(id); changed = true; }
+    }
+  });
+  return changed;
+}
+
 // ---- Musiques (OST)
 
 export async function listOsts() {
