@@ -50,6 +50,7 @@
     </defs>
   </svg>
 
+  <div class="mood-tint" id="mood-tint" aria-hidden="true"></div>
   <a class="skip-to" href="#main">Aller au contenu</a>
 
   <header class="topbar" id="topbar">
@@ -251,6 +252,7 @@
           <button type="button" data-align="justify">Justifié</button>
         </div>
         <label class="switch"><input type="checkbox" id="set-indent"><span>Alinéa en début de paragraphe</span></label>
+        <label class="switch"><input type="checkbox" id="set-moodTheme"><span>Couleurs qui suivent l'ambiance de la scène</span></label>
       </div>
 
       <div class="tab-panel" data-panel="voice" hidden>
@@ -334,6 +336,7 @@
 
         <h3>Lecture</h3>
         <label class="switch"><input type="checkbox" id="set-readTitle"><span>Lire le titre du chapitre</span></label>
+        <label class="switch"><input type="checkbox" id="set-showRecap"><span>Afficher le récap « Précédemment… » en début de chapitre</span></label>
         <label class="switch"><input type="checkbox" id="set-autoNext"><span>Enchaîner automatiquement le chapitre suivant</span></label>
         <label class="switch"><input type="checkbox" id="set-prefetchNext"><span>Précharger le chapitre suivant pendant l'écoute</span></label>
         <label class="switch"><input type="checkbox" id="set-keepAwake"><span>Garder l'écran allumé pendant la lecture</span></label>
@@ -443,6 +446,12 @@
       <p class="muted small">Astuce : sur YouTube, cherche par exemple « nom de l'anime OST sad » ou « emotional piano », copie le lien de la vidéo et colle-le ici. Certaines vidéos interdisent la lecture hors de YouTube : elles seront signalées et ignorées.</p>
     </div>
   </aside>
+
+  <!-- Téléchargements en cours -->
+  <div class="dl-bar" id="dl-bar" hidden role="status" aria-live="polite">
+    <div class="dl-info"><span id="dl-text">Téléchargement…</span><div class="dl-progress"><i id="dl-fill"></i></div></div>
+    <button class="btn small ghost" type="button" id="dl-cancel">Annuler</button>
+  </div>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
 

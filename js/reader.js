@@ -73,7 +73,7 @@ export class ReaderView extends EventTarget {
    * @param chapter  chapitre stocké
    * @param opts.imageUrl  (block, index) => url à afficher pour l'image
    */
-  render(chapter, { imageUrl, onNav, onIndexLink, knownIds, readTitle = true, estimateSeconds } = {}) {
+  render(chapter, { imageUrl, onNav, onIndexLink, onDownload, knownIds, readTitle = true, estimateSeconds } = {}) {
     this.clear();
     const lang = (chapter.lang || 'fr').slice(0, 2);
     const article = el('article', { class: 'chapter', lang: chapter.lang || 'fr' });
@@ -153,6 +153,11 @@ export class ReaderView extends EventTarget {
           el('span', { text: l.text }), known ? el('span', { class: 'badge', text: 'en mémoire' }) : null,
         ])]));
       });
+      const missing = chapter.index.filter(l => !knownIds?.has?.(l.id)).length;
+      if (missing && onDownload) {
+        box.append(el('button', { type: 'button', class: 'btn small primary', onclick: () => onDownload('index') },
+          [el('span', { text: `📥 Tout télécharger dans le navigateur (${missing} chapitre${missing > 1 ? 's' : ''})` })]));
+      }
       box.append(list);
       article.append(box);
     }
@@ -162,6 +167,8 @@ export class ReaderView extends EventTarget {
       el('div', { class: 'end-ornament', 'aria-hidden': 'true', text: '❖' }),
       el('p', { text: 'Fin du chapitre' }),
       this.navBar(chapter, onNav, 'bottom'),
+      onDownload && chapter.url ? el('button', { type: 'button', class: 'btn small ghost dl-next', onclick: () => onDownload('next') },
+        [el('span', { text: '📥 Télécharger la suite pour la lire hors ligne' })]) : null,
     ]));
 
     this.container.append(article);

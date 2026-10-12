@@ -277,9 +277,18 @@ export class MusicManager extends EventTarget {
     if (!this.tracks.length) return;
     if (!force && this.current && this.current.tags.includes(mood) && this.isPlaying()) return;
     const pick = this.pickTrack(mood, { exclude, allowSame });
-    if (!pick) return;
-    // si rien ne correspond exactement et qu'une musique joue déjà, on la garde
-    if (!pick.exact && this.current && this.isPlaying() && !force) return;
+    const suits = t => !!t && [mood, ...(MOOD_FALLBACK[mood] || [])].some(m => t.tags.includes(m));
+    if (!pick) {
+      // Aucune musique pour cette ambiance : on ne garde pas une musique qui contredit la scène
+      // (ex. une OST triste pendant un combat) -> fondu vers le silence
+      this.dispatchEvent(new CustomEvent('nomatch', { detail: mood }));
+      if (this.current && this.isPlaying() && !suits(this.current)) {
+        this.fadeTo(0, 1500).then(() => { if (!suits(this.current)) this.pauseBackend(); });
+      }
+      return;
+    }
+    // si rien ne correspond exactement et que la musique en cours convient encore, on la garde
+    if (!pick.exact && this.current && this.isPlaying() && !force && suits(this.current)) return;
     try { await this.playTrack(pick.track); } catch { /* déjà signalé */ }
   }
 
