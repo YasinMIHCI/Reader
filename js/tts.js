@@ -123,6 +123,7 @@ export class Speaker extends EventTarget {
     this.cps = 14.5;
     try { this.cps = parseFloat(localStorage.getItem(CPS_KEY)) || 14.5; } catch { /* ignore */ }
     this.watchdog = null;
+    this.stopAfter = Infinity;
   }
 
   setItems(items, lang) {
@@ -241,7 +242,9 @@ export class Speaker extends EventTarget {
       return;
     }
     const u = new SpeechSynthesisUtterance(text);
-    if (this.voice) { u.voice = this.voice; u.lang = this.voice.lang; } else u.lang = this.lang;
+    // voix propre à l'énoncé (personnage) sinon voix générale
+    const v = item.voice || this.voice;
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = this.lang;
     // Prosodie expressive : chaque bloc peut moduler la vitesse et la hauteur de la voix
     u.rate = Math.min(3, Math.max(0.3, this.rate * (item.rateMul || 1)));
     u.pitch = Math.min(2, Math.max(0, this.pitch * (item.pitchMul || 1)));
@@ -257,7 +260,7 @@ export class Speaker extends EventTarget {
       this.charIndex = offset;
       this.emit('segment', { index, offset });
       // On met la phrase suivante dans la file pour un enchaînement sans blanc
-      if (index + 1 < this.items.length && this.queuedNext !== index + 1) {
+      if (index + 1 < this.items.length && index + 1 <= this.stopAfter && this.queuedNext !== index + 1) {
         this.queuedNext = index + 1;
         this.speakItem(index + 1, 0, gen);
       }
@@ -325,6 +328,9 @@ export class Speaker extends EventTarget {
     }
   }
 
+  /** Dernier énoncé à lire avant de s'arrêter (utilisé par le mode hybride). */
+  get lastIndex() { return Math.min(this.items.length - 1, this.stopAfter); }
+
   onItemEnd(index, gen, len, dur) {
     clearInterval(this.estimateTimer);
     // Calibrage de la vitesse estimée (caractères / seconde à vitesse 1)
@@ -336,7 +342,7 @@ export class Speaker extends EventTarget {
       }
     }
     if (index !== this.index) return;
-    if (index >= this.items.length - 1) {
+    if (index >= this.lastIndex) {
       this.charIndex = 0;
       this.setState('stopped');
       this.emit('end');

@@ -9,6 +9,8 @@
 
 import * as db from './db.js';
 import { getSettings, setSettings } from './settings.js';
+import { getAllCasts, setAllCasts, mergeCasts } from './cast.js';
+import { getDict, setDict } from './speech.js';
 
 const API = 'https://api.github.com';
 const GIST_DESC = 'Re:Lecteur — bibliothèque (ne pas modifier à la main)';
@@ -92,7 +94,7 @@ async function readRemote(gistId) {
   if (f.truncated || !content) content = await (await fetch(f.raw_url)).text();
   const text = f.filename === FILE_GZ ? await gunzipB64(content) : content;
   const data = JSON.parse(text || '{}');
-  return { chapters: data.chapters || [], osts: data.osts || [], tombstones: data.tombstones || { chapters: {}, osts: {} }, updatedAt: data.updatedAt || 0, hasGz: !!g.files[FILE_GZ], hasJson: !!g.files[FILE_JSON] };
+  return { chapters: data.chapters || [], osts: data.osts || [], tombstones: data.tombstones || { chapters: {}, osts: {} }, prefs: data.prefs || {}, updatedAt: data.updatedAt || 0, hasGz: !!g.files[FILE_GZ], hasJson: !!g.files[FILE_JSON] };
 }
 
 async function writeRemote(gistId, data, remoteFiles) {
@@ -189,9 +191,16 @@ export class SyncManager extends EventTarget {
         const chapters = mergeLists(localChapters, remote.chapters, tombs.chapters);
         const osts = mergeLists(localOsts, remote.osts, tombs.osts, 'id', o => Math.max(o.updatedAt || 0, o.addedAt || 0));
         // applique localement
+        // préférences de lecture : voix des personnages + dictionnaire de prononciation
+        const cast = mergeCasts(remote.prefs?.cast || {}, getAllCasts());
+        setAllCasts(cast);
+        const dictMap = new Map();
+        [...(remote.prefs?.dict || []), ...getDict()].forEach(d => dictMap.set(d.from.toLowerCase(), d));
+        const dict = [...dictMap.values()];
+        setDict(dict);
         const changed = await db.replaceAll({ chapters, osts, deleteChapters: Object.keys(tombs.chapters), deleteOsts: Object.keys(tombs.osts) });
         // renvoie au serveur
-        await writeRemote(gistId, { app: 'relecteur', sync: 1, updatedAt: Date.now(), chapters, osts, tombstones: tombs }, remote);
+        await writeRemote(gistId, { app: 'relecteur', sync: 1, updatedAt: Date.now(), chapters, osts: osts.filter(o => o.type !== 'file'), tombstones: tombs, prefs: { cast, dict } }, remote);
         setSettings({ lastSyncAt: Date.now() });
         this.setStatus('ok');
         if (changed) this.dispatchEvent(new CustomEvent('pulled'));

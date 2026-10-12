@@ -87,6 +87,14 @@
       </div>
 
       <div class="home-grid">
+        <section class="card news-card" id="news-card" hidden>
+          <div class="card-head">
+            <h2>✨ Nouveaux chapitres</h2>
+            <button class="link-btn" type="button" id="btn-notify" hidden>🔔 Activer les alertes</button>
+          </div>
+          <ul class="recent-list" id="news-list"></ul>
+        </section>
+
         <section class="card" id="resume-card" hidden>
           <h2>Reprendre</h2>
           <div id="resume-body"></div>
@@ -288,6 +296,35 @@
         <label class="slider"><span>Hauteur <output id="out-pitch"></output></span><input type="range" id="set-pitch" min="0.5" max="1.5" step="0.05"></label>
         <label class="slider"><span>Volume <output id="out-volume"></output></span><input type="range" id="set-volume" min="0" max="1" step="0.05"></label>
 
+        <div id="hybrid-box" hidden>
+          <label class="switch"><input type="checkbox" id="set-hybrid"><span><b>Mode économie</b> : la narration est lue par la voix de l'appareil (gratuite), seuls les dialogues utilisent la voix IA — tes crédits durent 2 à 3 fois plus longtemps</span></label>
+        </div>
+
+        <div id="album-box" hidden>
+          <h3>Écoute écran éteint &amp; MP3</h3>
+          <p class="muted small">Génère tout le chapitre avec la voix IA et le transforme en une seule piste audio : elle continue quand l'écran est verrouillé (boutons du casque / de la voiture) et peut être téléchargée en MP3. Les passages déjà écoutés ne sont pas refacturés.</p>
+          <div class="row wrap">
+            <button class="btn small primary" type="button" id="album-prepare">🎧 Préparer l'audio du chapitre</button>
+            <button class="btn small" type="button" id="album-download" hidden>⬇ Télécharger le MP3</button>
+          </div>
+          <p class="small" id="album-status"></p>
+        </div>
+
+        <h3>Voix des personnages</h3>
+        <label class="switch"><input type="checkbox" id="set-multiVoice"><span>Une voix différente pour chaque personnage</span></label>
+        <p class="muted small">Les répliques écrites « Nom : “…” » sont reconnues. Chaque personnage reçoit automatiquement sa propre voix, mémorisée pour toute la série ; tu peux la changer ici.</p>
+        <div class="cast-list" id="cast-list"></div>
+
+        <h3>Prononciation</h3>
+        <p class="muted small">Corrige un mot mal prononcé (noms propres, suffixes…). Les lettres étirées (« visaaaage »), les tirets (« —— ») et les répliques muettes sont déjà corrigés automatiquement.</p>
+        <div class="dict-list" id="dict-list"></div>
+        <form class="dict-add" id="dict-add">
+          <input type="text" id="dict-from" placeholder="Écrit" required>
+          <span aria-hidden="true">→</span>
+          <input type="text" id="dict-to" placeholder="Prononcé" required>
+          <button class="btn small" type="submit">Ajouter</button>
+        </form>
+
         <h3>Suivi visuel</h3>
         <label class="switch"><input type="checkbox" id="set-highlightWord"><span>Surligner le mot lu</span></label>
         <label class="switch"><input type="checkbox" id="set-highlightSentence"><span>Surligner la phrase lue</span></label>
@@ -381,10 +418,16 @@
     </div>
     <div class="drawer-body">
       <form id="ost-form" class="ost-form" autocomplete="off">
-        <input type="url" id="ost-url" placeholder="Lien YouTube d'une OST (youtube.com/watch?v=… ou youtu.be/…)" required spellcheck="false">
-        <p class="muted small">Choisis une ou plusieurs ambiances pour cette musique :</p>
+        <p class="muted small">1. Choisis une ou plusieurs ambiances :</p>
         <div class="tag-picker" id="ost-tags"></div>
-        <button class="btn primary" type="submit">Ajouter à la bibliothèque</button>
+        <p class="muted small">2. Ajoute un lien YouTube…</p>
+        <div class="row">
+          <input type="url" id="ost-url" placeholder="youtube.com/watch?v=… ou youtu.be/…" spellcheck="false">
+          <button class="btn primary small" type="submit">Ajouter</button>
+        </div>
+        <p class="muted small">… ou importe tes propres fichiers audio (MP3, M4A, OGG…) : <b>lus directement par le site, sans aucune publicité</b>, et disponibles hors ligne.</p>
+        <label class="btn small" for="ost-files">🎵 Importer des fichiers audio</label>
+        <input type="file" id="ost-files" accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac" multiple hidden>
       </form>
 
       <h3>Lecture automatique</h3>
