@@ -56,6 +56,21 @@ Réglages → Voix → **Moteur de voix** :
 
 La clé n'est stockée que dans ton navigateur et n'est envoyée qu'au service choisi.
 
+## Voix des personnages, prononciation, mode économie
+
+- **Une voix par personnage** : les répliques écrites « Nom : “…” » sont reconnues ; chaque personnage reçoit automatiquement sa propre voix (mémorisée pour toute la série, modifiable dans Réglages → Voix → *Voix des personnages*, avec un bouton ▶ pour écouter). Le nom n'est plus lu à voix haute.
+- **Texte parlé nettoyé** : lettres étirées (« visaaaage » → « visage »), suites de tirets (« —— ») transformées en pause, répliques muettes (« “————” ») lues comme un silence. Le surlignage reste exact sur le texte affiché.
+- **Dictionnaire de prononciation** : ajoute tes corrections (« Roswaal → Rozwal »…).
+- **Mode économie** (voix IA) : la narration est lue par la voix de l'appareil, seuls les dialogues utilisent ElevenLabs / OpenAI → 2 à 3 fois moins de crédits.
+
+## Écoute écran éteint & MP3
+
+Avec une voix IA, Réglages → Voix → **Préparer l'audio du chapitre** : tout le chapitre est généré puis assemblé en une seule piste audio, qui continue écran verrouillé (boutons du casque / de la voiture) et peut être téléchargée en MP3. Le coût est annoncé avant de commencer ; les passages déjà générés ne sont jamais refacturés.
+
+## Séries & nouveaux chapitres
+
+La bibliothèque est groupée par série puis par arc (« Arc VII · 12 lus · 9 terminés »). Re:Lecteur vérifie régulièrement si un chapitre plus récent est sorti (sites WordPress) : il apparaît dans la carte **✨ Nouveaux chapitres** de l'accueil, avec une pastille sur la bibliothèque, et une notification si tu actives les alertes (le site doit être ouvert).
+
 ## Compte & sauvegarde en ligne
 
 Sans compte, tout reste déjà dans le navigateur (même après l'avoir fermé). Pour ne jamais rien perdre et retrouver ta bibliothèque partout :
@@ -75,6 +90,8 @@ En offre gratuite (10 000 caractères/mois), quand les crédits sont épuisés, 
 1. Bouton 🎵 en haut → colle un lien YouTube (vidéo d'OST), coche une ou plusieurs ambiances, « Ajouter ».
 2. Pendant la lecture, l'ambiance détectée s'affiche dans le lecteur (ex. 💧 Triste). La musique correspondante démarre automatiquement, change en fondu quand la scène change, et se met en pause avec la voix.
 3. Clique sur la puce d'ambiance pour forcer une ambiance, passer à une autre musique ou couper la musique.
+
+**Sans publicité** : en plus des liens YouTube, tu peux importer tes propres fichiers audio (MP3, M4A, OGG… achetés ou issus de tes CD). Ils sont stockés sur l'appareil et lus directement par le site, sans aucune pub, même hors ligne. (Re:Lecteur ne télécharge pas les vidéos YouTube : ce serait contraire à leurs conditions d'utilisation.)
 
 Si aucune musique n'a exactement le bon tag, une ambiance proche est utilisée (ex. tension → mystère). Certaines vidéos interdisent la lecture hors de YouTube : elles sont signalées et ignorées.
 
@@ -127,6 +144,10 @@ js/neural.js            voix IA OpenAI / ElevenLabs (cache, préchargement, sync
 js/mood.js              analyse de l'ambiance du texte (lexique + ponctuation, lissage par scène)
 js/music.js             bibliothèque d'OST YouTube + lecteur + choix selon l'ambiance
 js/sync.js              compte : sauvegarde / synchronisation via un Gist GitHub privé
+js/speech.js            texte parlé (nettoyage, dictionnaire, correspondance des positions)
+js/cast.js              voix des personnages (par série)
+js/hybrid.js            mode économie : narration appareil + dialogues voix IA
+js/series.js            séries, arcs et détection des nouveaux chapitres
 js/reader.js            rendu, surlignage, marqueur de voix, défilement automatique
 js/intro.js             intro animée de 5 s (canvas)
 js/db.js                stockage local (IndexedDB) + export/import

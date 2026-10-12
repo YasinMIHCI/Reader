@@ -93,7 +93,7 @@ function openAiInstructions(item) {
 
 async function synthOpenAI(item, s, signal) {
   if (!s.openaiKey) throw new Error('OpenAI : ajoute ta clé API dans Réglages → Voix.');
-  const body = { model: s.openaiModel, voice: s.openaiVoice, input: item.text, response_format: 'mp3' };
+  const body = { model: s.openaiModel, voice: item.openaiVoice || s.openaiVoice, input: item.text, response_format: 'mp3' };
   if (/gpt-4o/.test(s.openaiModel)) body.instructions = openAiInstructions(item);
   const res = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
@@ -114,7 +114,7 @@ async function synthEleven(item, s, signal) {
   const voice_settings = v3
     ? { stability: 0.5, similarity_boost: 0.75 }
     : { stability: ELEVEN_STABILITY[item.mood] ?? 0.45, similarity_boost: 0.75, style: 0.35, use_speaker_boost: true };
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(s.elevenVoice)}/with-timestamps?output_format=mp3_44100_128`, {
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(item.elevenVoice || s.elevenVoice)}/with-timestamps?output_format=mp3_44100_128`, {
     method: 'POST',
     signal,
     headers: { 'xi-api-key': s.elevenKey, 'Content-Type': 'application/json' },
@@ -179,6 +179,39 @@ function charWeights(text) {
   return w;
 }
 
+/** Position (secondes) d'un caractère dans un passage. */
+function timeInPart(r, ci, dur) {
+  if (r.alignment) return r.alignment[Math.min(ci, r.alignment.length - 1)] || 0;
+  if (!dur) return 0;
+  return (r.weights[Math.min(ci, r.weights.length - 1)] / r.weights[r.weights.length - 1]) * dur;
+}
+/** Caractère prononcé à l'instant t (secondes) d'un passage. */
+function charInPart(r, t, dur) {
+  let arr; let target;
+  if (r.alignment) { arr = r.alignment; target = t; }
+  else {
+    if (!dur) return 0;
+    arr = r.weights;
+    target = (t / dur) * r.weights[r.weights.length - 1];
+  }
+  let lo = 0; let hi = Math.min(arr.length, r.text.length) - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (arr[mid] <= target) lo = mid; else hi = mid - 1;
+  }
+  return Math.max(0, lo);
+}
+function blobDuration(url) {
+  return new Promise(resolve => {
+    const a = new Audio();
+    a.preload = 'metadata';
+    const done = v => { a.src = ''; resolve(v); };
+    a.addEventListener('loadedmetadata', () => done(isFinite(a.duration) ? a.duration : 0), { once: true });
+    a.addEventListener('error', () => done(0), { once: true });
+    a.src = url;
+  });
+}
+
 function wordAround(text, i) {
   const isW = c => /[\p{L}\p{N}'’-]/u.test(c);
   let a = i; let b = i;
@@ -203,6 +236,7 @@ export class AudioSpeaker extends EventTarget {
     this.current = null;
     this.raf = 0;
     this.lastWord = -1;
+    this.stopAfter = Infinity;
     this.audio = new Audio();
     this.audio.preload = 'auto';
     this.audio.preservesPitch = true;
@@ -221,6 +255,7 @@ export class AudioSpeaker extends EventTarget {
     this.urls.forEach(u => URL.revokeObjectURL(u));
     this.urls = [];
     this.cache.clear();
+    this.dropAlbum();
     this.items = items;
     this.lang = lang;
     this.index = 0;
@@ -235,8 +270,8 @@ export class AudioSpeaker extends EventTarget {
   async cacheKey(item) {
     const s = getSettings();
     const id = s.engine === 'openai'
-      ? `openai|${s.openaiModel}|${s.openaiVoice}|${/gpt-4o/.test(s.openaiModel) ? item.mood + '|' + (item.dialogue ? 'd' : 'n') : ''}`
-      : `eleven|${s.elevenModel}|${s.elevenVoice}|${item.mood}`;
+      ? `openai|${s.openaiModel}|${item.openaiVoice || s.openaiVoice}|${/gpt-4o/.test(s.openaiModel) ? item.mood + '|' + (item.dialogue ? 'd' : 'n') : ''}`
+      : `eleven|${s.elevenModel}|${item.elevenVoice || s.elevenVoice}|${item.mood}`;
     return sha(id + '|' + item.text);
   }
 
@@ -276,14 +311,72 @@ export class AudioSpeaker extends EventTarget {
     }
     const url = URL.createObjectURL(rec.blob);
     this.urls.push(url);
-    return { url, alignment: rec.alignment, weights: charWeights(item.text), text: item.text };
+    return { url, blob: rec.blob, alignment: rec.alignment, weights: charWeights(item.text), text: item.text };
   }
 
+  // ---------- Chapitre entier en une seule piste (écoute écran éteint, MP3)
+
+  dropAlbum() {
+    if (this.album) {
+      if (this.audio.src === this.album.url) this.audio.removeAttribute('src');
+      URL.revokeObjectURL(this.album.url);
+    }
+    this.album = null;
+  }
+
+  /** Nombre de caractères qui restent à générer (non présents dans le cache). */
+  async pendingChars() {
+    let n = 0;
+    for (const it of this.items) {
+      const key = await this.cacheKey({ ...it, lang: this.lang });
+      if (!(await getAudio(key).catch(() => null))) n += it.text.length;
+    }
+    return n;
+  }
+
+  /**
+   * Génère (ou reprend du cache) tous les passages du chapitre et les assemble en une piste.
+   * @param onProgress (fait, total)
+   */
+  async prepareAlbum({ onProgress, signal } = {}) {
+    const parts = [];
+    for (let k = 0; k < this.items.length; k++) {
+      if (signal?.aborted) throw new DOMException('Annulé', 'AbortError');
+      parts.push(await this.ensure(k));
+      onProgress?.(k + 1, this.items.length);
+    }
+    const starts = [];
+    let t = 0;
+    for (const r of parts) {
+      r.dur = r.dur || await blobDuration(r.url);
+      if (!r.dur && r.alignment) r.dur = r.alignment[r.alignment.length - 1] + 0.3;
+      starts.push(t);
+      t += r.dur;
+    }
+    const blob = new Blob(parts.map(r => r.blob), { type: parts[0]?.blob.type || 'audio/mpeg' });
+    this.dropAlbum();
+    this.album = { url: URL.createObjectURL(blob), blob, parts, starts, total: t };
+    return this.album;
+  }
+
+  albumIndexAt(t) {
+    const st = this.album.starts;
+    let lo = 0; let hi = st.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (st[mid] <= t) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+
+  /** Prépare à l'avance les 2 prochains énoncés à lire avec la voix IA (pas de blanc). */
   prefetch(from) {
-    for (let k = from; k < Math.min(this.items.length, from + 2); k++) {
+    let n = 0;
+    for (let k = from; k < this.items.length && n < 2; k++) {
+      if (this.items[k].engine === 'browser') continue; // mode hybride : lu par l'appareil
       this.ensure(k)?.catch(() => {});
+      n++;
     }
   }
+
+  get lastIndex() { return Math.min(this.items.length - 1, this.stopAfter); }
 
   async playFrom(index, offset = 0) {
     const gen = ++this.gen;
@@ -293,6 +386,7 @@ export class AudioSpeaker extends EventTarget {
     this.charIndex = offset;
     this.setState('playing');
     this.emit('segment', { index, offset });
+    if (this.album) { this.playAlbum(index, offset, gen); return; }
     this.emit('loading', true);
     let r;
     try {
@@ -331,6 +425,29 @@ export class AudioSpeaker extends EventTarget {
     this.tick(gen);
   }
 
+  async playAlbum(index, offset, gen) {
+    const al = this.album;
+    if (this.audio.src !== al.url) this.audio.src = al.url;
+    this.audio.playbackRate = this.rate;
+    this.audio.volume = this.volume;
+    await new Promise(res => {
+      if (this.audio.readyState >= 1) return res();
+      this.audio.addEventListener('loadedmetadata', res, { once: true });
+      this.audio.addEventListener('error', res, { once: true });
+    });
+    if (gen !== this.gen) return;
+    const r = al.parts[index];
+    this.audio.currentTime = al.starts[index] + (offset > 0 ? timeInPart(r, offset, r.dur) : 0);
+    this.lastWord = -1;
+    try { await this.audio.play(); } catch (e) {
+      if (gen !== this.gen) return;
+      this.setState('paused');
+      this.emit('error', { message: e.name === 'NotAllowedError' ? 'Appuie sur ▶ pour lancer la lecture.' : (e.message || 'Lecture impossible') });
+      return;
+    }
+    this.tick(gen);
+  }
+
   duration() {
     const d = this.audio.duration;
     return isFinite(d) && d > 0 ? d : null;
@@ -366,6 +483,21 @@ export class AudioSpeaker extends EventTarget {
 
   tick(gen) {
     if (gen !== this.gen || this.state !== 'playing') return;
+    if (this.album && !this.audio.paused) {
+      const al = this.album;
+      const t = this.audio.currentTime;
+      const k = this.albumIndexAt(t);
+      const r = al.parts[k];
+      if (k !== this.index) { this.index = k; this.lastWord = -1; this.emit('segment', { index: k, offset: 0 }); }
+      const w = wordAround(r.text, charInPart(r, t - al.starts[k], r.dur));
+      if (w.start !== this.lastWord) {
+        this.lastWord = w.start;
+        this.charIndex = w.start;
+        this.emit('word', { index: k, charIndex: w.start, charLength: w.length, estimated: !r.alignment });
+      }
+      this.raf = requestAnimationFrame(() => this.tick(gen));
+      return;
+    }
     const r = this.current;
     if (r && !this.audio.paused) {
       const ci = this.charForTime(this.audio.currentTime);
@@ -382,7 +514,7 @@ export class AudioSpeaker extends EventTarget {
   onEnded() {
     if (this.state !== 'playing') return;
     cancelAnimationFrame(this.raf);
-    if (this.index >= this.items.length - 1) {
+    if (this.album || this.index >= this.lastIndex) {
       this.charIndex = 0;
       this.setState('stopped');
       this.emit('end');
@@ -393,7 +525,7 @@ export class AudioSpeaker extends EventTarget {
 
   play() {
     if (!this.items.length) return;
-    if (this.state === 'paused' && this.current && this.audio.src && this.audio.currentTime > 0 && !this.audio.ended) {
+    if (this.state === 'paused' && (this.current || this.album) && this.audio.src && this.audio.currentTime > 0 && !this.audio.ended) {
       this.setState('playing');
       this.audio.play().then(() => this.tick(this.gen)).catch(e => {
         this.setState('paused');

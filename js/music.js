@@ -82,7 +82,16 @@ export class MusicManager extends EventTarget {
     this.history = [];
     this.wantPlaying = false;
     this.preview = false;
+    // Lecteur pour les fichiers audio importés (aucune publicité)
+    this.fileAudio = new Audio();
+    this.fileAudio.preload = 'auto';
+    this.fileUrl = null;
+    this.fileAudio.addEventListener('ended', () => {
+      if (this.current?.type === 'file') this.playForMood(this.mood, { force: true, allowSame: true });
+    });
   }
+
+  isFile(t = this.current) { return t?.type === 'file'; }
 
   async init() {
     this.tracks = await db.listOsts().catch(() => []);
@@ -110,6 +119,20 @@ export class MusicManager extends EventTarget {
     return ost;
   }
 
+  /** Importe un fichier audio (MP3, M4A, OGG…) : stocké sur l'appareil, lu sans publicité. */
+  async addFile(file, tags) {
+    if (!file || !/^audio\//.test(file.type || '') && !/\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|webm)$/i.test(file.name)) {
+      throw new Error(`« ${file?.name || 'fichier'} » n'est pas un fichier audio.`);
+    }
+    const id = `file-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    await db.saveAudio(`ost:${id}`, file, null);
+    const ost = { id, type: 'file', title: file.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' '), size: file.size, tags: [...new Set(tags)], addedAt: Date.now() };
+    this.tracks.push(ost);
+    await db.saveOst(ost);
+    this.emitChange();
+    return ost;
+  }
+
   async update(ost, patch) {
     Object.assign(ost, patch, { updatedAt: Date.now() });
     await db.saveOst(ost);
@@ -119,6 +142,7 @@ export class MusicManager extends EventTarget {
   async remove(ost) {
     this.tracks = this.tracks.filter(t => t.id !== ost.id);
     await db.deleteOst(ost.id);
+    if (ost.type === 'file') await db.deleteAudio(`ost:${ost.id}`).catch(() => {});
     this.dispatchEvent(new CustomEvent('deleted', { detail: ost.id }));
     if (this.current?.id === ost.id) this.stop();
     this.emitChange();
@@ -176,16 +200,29 @@ export class MusicManager extends EventTarget {
     this.playForMood(this.mood, { force: true, exclude: bad?.id });
   }
 
+  setVol(v) {
+    if (this.isFile()) this.fileAudio.volume = Math.max(0, Math.min(1, v / 100));
+    else try { this.player?.setVolume(v); } catch { /* ignore */ }
+  }
+  pauseBackend() {
+    if (this.isFile()) this.fileAudio.pause();
+    else try { this.player?.pauseVideo(); } catch { /* ignore */ }
+  }
+  resumeBackend() {
+    if (this.isFile()) this.fileAudio.play().catch(() => {});
+    else try { this.player?.playVideo(); } catch { /* ignore */ }
+  }
+
   fadeTo(target, ms = 1500) {
     clearInterval(this.fadeTimer);
     return new Promise(resolve => {
-      if (!this.player?.setVolume) { this.vol = target; resolve(); return; }
+      if (!this.isFile() && !this.player?.setVolume) { this.vol = target; resolve(); return; }
       const start = this.vol;
       const t0 = performance.now();
       this.fadeTimer = setInterval(() => {
         const p = Math.min(1, (performance.now() - t0) / ms);
         this.vol = Math.round(start + (target - start) * p);
-        try { this.player.setVolume(this.vol); } catch { /* ignore */ }
+        this.setVol(this.vol);
         if (p >= 1) { clearInterval(this.fadeTimer); resolve(); }
       }, 60);
     });
@@ -206,14 +243,30 @@ export class MusicManager extends EventTarget {
   }
 
   async playTrack(track, { fadeMs = 1800 } = {}) {
-    await this.ensurePlayer();
+    if (!this.isFile(track)) await this.ensurePlayer();
     if (this.current && this.current.id !== track.id && this.vol > 0) await this.fadeTo(0, fadeMs * 0.6);
+    // arrête l'autre lecteur
+    if (this.isFile(track)) { try { this.player?.pauseVideo(); } catch { /* ignore */ } }
+    else this.fileAudio.pause();
     this.current = track;
     this.history.push(track.id);
     if (this.history.length > 20) this.history.shift();
     this.vol = 0;
-    this.player.setVolume(0);
-    this.player.loadVideoById({ videoId: track.videoId, startSeconds: track.start || 0 });
+    this.setVol(0);
+    if (this.isFile(track)) {
+      const rec = await db.getAudio(`ost:${track.id}`).catch(() => null);
+      if (!rec?.blob) {
+        this.toast(`Le fichier « ${track.title} » n'est pas sur cet appareil.`, { type: 'error' });
+        this.update(track, { broken: true });
+        this.current = null;
+        return;
+      }
+      if (this.fileUrl) URL.revokeObjectURL(this.fileUrl);
+      this.fileUrl = URL.createObjectURL(rec.blob);
+      this.fileAudio.src = this.fileUrl;
+      this.fileAudio.volume = 0;
+      await this.fileAudio.play().catch(() => {});
+    } else this.player.loadVideoById({ videoId: track.videoId, startSeconds: track.start || 0 });
     this.dispatchEvent(new CustomEvent('track', { detail: track }));
     this.emitChange();
     await this.fadeTo(this.targetVolume(), fadeMs);
@@ -231,6 +284,7 @@ export class MusicManager extends EventTarget {
   }
 
   isPlaying() {
+    if (this.isFile()) return !this.fileAudio.paused && !this.fileAudio.ended;
     try { return this.player?.getPlayerState?.() === window.YT?.PlayerState.PLAYING; } catch { return false; }
   }
 
@@ -258,17 +312,15 @@ export class MusicManager extends EventTarget {
     if (!s.musicAuto || !this.tracks.length) return;
     if (playing) {
       this.wantPlaying = true;
-      if (this.current && this.player) {
-        try {
-          if (this.player.getPlayerState() !== window.YT.PlayerState.PLAYING) {
-            this.player.playVideo();
-            this.fadeTo(this.targetVolume(), 1200);
-          }
-        } catch { /* ignore */ }
+      if (this.current && (this.player || this.isFile())) {
+        if (!this.isPlaying()) {
+          this.resumeBackend();
+          this.fadeTo(this.targetVolume(), 1200);
+        }
         if (!this.current.tags.includes(this.mood)) this.playForMood(this.mood);
       } else this.playForMood(this.mood, { force: true });
-    } else if (s.musicFollowVoice && this.current && this.player) {
-      this.fadeTo(0, 700).then(() => { if (!this.voicePlaying) try { this.player.pauseVideo(); } catch { /* ignore */ } });
+    } else if (s.musicFollowVoice && this.current) {
+      this.fadeTo(0, 700).then(() => { if (!this.voicePlaying) this.pauseBackend(); });
     }
   }
 
@@ -277,7 +329,7 @@ export class MusicManager extends EventTarget {
     if (!this.current) return;
     clearInterval(this.fadeTimer);
     this.vol = this.targetVolume();
-    try { this.player?.setVolume(this.vol); } catch { /* ignore */ }
+    this.setVol(this.vol);
   }
 
   next() {
@@ -286,15 +338,15 @@ export class MusicManager extends EventTarget {
   }
 
   togglePause() {
-    if (!this.player || !this.current) { this.wantPlaying = true; this.playForMood(this.mood, { force: true }); return; }
-    if (this.isPlaying()) { this.wantPlaying = false; this.fadeTo(0, 500).then(() => this.player.pauseVideo()); }
-    else { this.wantPlaying = true; this.player.playVideo(); this.fadeTo(this.targetVolume(), 800); }
+    if (!this.current || (!this.player && !this.isFile())) { this.wantPlaying = true; this.playForMood(this.mood, { force: true }); return; }
+    if (this.isPlaying()) { this.wantPlaying = false; this.fadeTo(0, 500).then(() => this.pauseBackend()); }
+    else { this.wantPlaying = true; this.resumeBackend(); this.fadeTo(this.targetVolume(), 800); }
   }
 
   stop() {
     this.wantPlaying = false;
     clearTimeout(this.switchTimer);
-    if (this.player) this.fadeTo(0, 500).then(() => { try { this.player.stopVideo(); } catch { /* ignore */ } });
+    if (this.current) this.fadeTo(0, 500).then(() => { try { this.player?.stopVideo(); } catch { /* ignore */ } this.fileAudio.pause(); });
     this.current = null;
     this.dispatchEvent(new CustomEvent('track', { detail: null }));
     this.emitChange();

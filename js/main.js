@@ -9,6 +9,10 @@ import { ReaderView, fmtDuration } from './reader.js';
 import { playIntro } from './intro.js';
 import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAULT_VOICES, listElevenVoices, getElevenQuota, isFreeElevenVoice, isRetiredVoice } from './neural.js';
 import { SyncManager, recordDeletion } from './sync.js';
+import { HybridSpeaker } from './hybrid.js';
+import { groupLibrary, checkNewChapters, notifyNew } from './series.js';
+import { prepareSpeech, toDisplay, detectSpeaker, getDict, setDict } from './speech.js';
+import { ensureRoles, getCast, setRole, NARRATOR, UNKNOWN, PITCHES } from './cast.js';
 import { analyzeChapter, MOODS, moodById, MOOD_PROSODY } from './mood.js';
 import { MusicManager } from './music.js';
 
@@ -38,8 +42,10 @@ const state = {
 
 // Deux moteurs : voix de l'appareil (Web Speech) ou voix IA (OpenAI / ElevenLabs)
 const engines = { browser: new Speaker(), neural: new AudioSpeaker() };
+engines.hybrid = new HybridSpeaker(engines.browser, engines.neural);
 // engineFallback : crédits de voix IA épuisés -> voix de l'appareil jusqu'au prochain changement de réglage
-const engineFor = (s = getSettings()) => (s.engine === 'browser' || state.engineFallback ? engines.browser : engines.neural);
+const engineFor = (s = getSettings()) => (s.engine === 'browser' || state.engineFallback ? engines.browser
+  : s.hybrid ? engines.hybrid : engines.neural);
 const sync = new SyncManager();
 let speaker = engineFor();
 /** Écoute un événement du moteur actif uniquement. */
@@ -95,6 +101,7 @@ function showDrawer(id) {
   openDrawer = d;
   if (id === 'library') renderLibrary();
   if (id === 'music') renderMusic();
+  if (id === 'settings') { renderCast(); renderDict(); }
   setTimeout(() => d.querySelector('input[type=search]')?.focus({ preventScroll: true }), 50);
 }
 function closeDrawers() {
@@ -104,6 +111,7 @@ function closeDrawers() {
 }
 function selectTab(name) {
   $$('#settings .tabs [role=tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  if (name === 'voice') { renderCast(); renderDict(); }
   $$('#settings .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== name; });
 }
 
@@ -543,45 +551,94 @@ function prosodyFor(it, e, k) {
   return { rate: 1 + r * e, pitch: 1 + p * e * 1.4 };
 }
 
+const seriesKey = ch => ch?.siteName || (ch?.url ? new URL(ch.url).host : 'Texte collé');
+
+function voicePools() {
+  const lang = state.chapter?.lang || 'fr';
+  return {
+    browser: sortedVoices(lang).same.slice(0, 6).map(v => v.voiceURI),
+    eleven: elevenVoiceOptions().filter(([, n]) => !n.startsWith('💎')).map(([id]) => id),
+    openai: OPENAI_VOICES.map(([id]) => id),
+  };
+}
+function baseVoices() {
+  const s = getSettings();
+  return { browser: pickVoice(s.voiceURI, state.chapter?.lang || 'fr-FR')?.voiceURI || '', eleven: s.elevenVoice, openai: s.openaiVoice };
+}
+
 function buildItems() {
   const s = getSettings();
   const segs = state.segments;
-  const neural = speaker !== engines.browser;
-  const maxLen = neural ? 520 : (s.fluid ? 240 : 0);
+  const mode = speaker === engines.browser ? 'browser' : speaker === engines.hybrid ? 'hybrid' : 'neural';
+  const maxLen = mode === 'browser' ? (s.fluid ? 240 : 0) : 520;
+  const dict = getDict();
+  const multi = !!s.multiVoice;
+  // Qui parle ? (« Nom : “…” »)
+  const blockSpeaker = {};
+  const counts = new Map();
+  (state.chapter?.blocks || []).forEach((bl, i) => {
+    if (bl.type !== 'p' && bl.type !== 'quote') return;
+    const n = detectSpeaker(bl.text);
+    if (n) { blockSpeaker[i] = n; counts.set(n, (counts.get(n) || 0) + 1); }
+  });
+  state.characters = [...counts.entries()].sort((x, y) => y[1] - x[1]);
+  const series = seriesKey(state.chapter);
+  const cast = multi ? ensureRoles(series, state.characters.map(c => c[0]), voicePools(), baseVoices()) : {};
+  const lang = state.chapter?.lang || 'fr-FR';
+  const allVoices = sortedVoices(lang);
+  const voiceByUri = uri => [...allVoices.same, ...allVoices.others].find(v => v.voiceURI === uri);
+
   const items = [];
   state.segChunk = new Array(segs.length);
   let cur = null;
   segs.forEach((sg, i) => {
     const mood = moodOfSeg(i);
-    const canMerge = cur && maxLen && cur.text.length + 1 + sg.text.length <= maxLen && cur.mood === mood
-      && (sg.block === -1) === (cur.block === -1) && (neural || cur.dialogue === sg.dialogue);
+    const role = blockSpeaker[sg.block] || (sg.dialogue ? UNKNOWN : NARRATOR);
+    const engine = mode === 'hybrid' ? (role === NARRATOR ? 'browser' : 'neural') : mode === 'browser' ? 'browser' : 'neural';
+    const roleKey = multi ? role : (sg.dialogue ? 'd' : 'n');
+    const { spoken, map } = prepareSpeech(sg.text, { dict, stripSpeaker: multi && role !== NARRATOR && role !== UNKNOWN });
+    const canMerge = cur && maxLen && cur.text.length + 1 + spoken.length <= maxLen && cur.mood === mood
+      && (sg.block === -1) === (cur.block === -1) && cur.engine === engine
+      && (engine === 'neural' && !multi ? true : cur.roleKey === roleKey);
     if (canMerge) {
       const start = cur.text.length + 1;
-      cur.text += ' ' + sg.text;
-      cur.parts.push({ seg: i, start });
+      cur.text += ' ' + spoken;
+      cur.parts.push({ seg: i, start, map });
       cur.dialogue = cur.dialogue || sg.dialogue;
       state.segChunk[i] = { chunk: items.length - 1, start };
     } else {
-      cur = { text: sg.text, parts: [{ seg: i, start: 0 }], mood, dialogue: sg.dialogue, block: sg.block };
+      cur = { text: spoken, parts: [{ seg: i, start: 0, map }], mood, dialogue: sg.dialogue, block: sg.block, role, roleKey, engine };
+      // voix du personnage (le narrateur garde la voix choisie dans les réglages)
+      if (multi && role !== NARRATOR && cast[role]) {
+        const r = cast[role];
+        if (engine === 'browser') { cur.voice = voiceByUri(r.browser?.uri) || undefined; cur.castPitch = r.browser?.pitch || 1; }
+        else { cur.elevenVoice = r.eleven; cur.openaiVoice = r.openai; }
+      }
       items.push(cur);
       state.segChunk[i] = { chunk: items.length - 1, start: 0 };
     }
   });
-  if (!neural) {
-    const e = s.expressiveness ?? 0.6;
-    items.forEach((it, k) => { const pr = prosodyFor(it, e, k); it.rateMul = pr.rate; it.pitchMul = pr.pitch; });
-  }
+  const e = s.expressiveness ?? 0.6;
+  items.forEach((it, k) => {
+    if (it.engine !== 'browser') return;
+    const pr = prosodyFor(it, e, k);
+    it.rateMul = pr.rate;
+    it.pitchMul = pr.pitch * (it.castPitch || 1);
+  });
   state.items = items;
-  speaker.setItems(items, state.chapter?.lang || 'fr-FR');
+  speaker.setItems(items, lang);
+  if (openDrawer?.id === 'settings') renderCast();
 }
 
 /** Énoncé + position -> phrase + position dans la phrase. */
-function locate(chunk, ci) {
+function locate(chunk, ci, len = 1) {
   const it = state.items[chunk];
-  if (!it) return { seg: Math.max(0, state.currentSeg), local: 0 };
+  if (!it) return { seg: Math.max(0, state.currentSeg), local: 0, length: 1 };
   let part = it.parts[0];
   for (const p of it.parts) { if (p.start <= ci) part = p; else break; }
-  return { seg: part.seg, local: Math.max(0, ci - part.start) };
+  // position dans le texte parlé -> position dans le texte affiché
+  const d = toDisplay(part.map, Math.max(0, ci - part.start), len);
+  return { seg: part.seg, local: d.index, length: d.length };
 }
 
 function setSegFromEngine(seg) {
@@ -686,10 +743,12 @@ on('segment', e => {
   setSegFromEngine(loc.seg);
 });
 on('word', e => {
-  const loc = locate(e.detail.index, e.detail.charIndex);
+  const loc = locate(e.detail.index, e.detail.charIndex, e.detail.charLength);
   setSegFromEngine(loc.seg);
   state.currentLocal = loc.local;
-  reader.setWord(loc.seg, loc.local, e.detail.charLength);
+  // pas de surlignage sur un signe de ponctuation isolé (« … »)
+  const txt = state.segments[loc.seg]?.text.substr(loc.local, loc.length) || '';
+  if (/[\p{L}\p{N}]/u.test(txt)) reader.setWord(loc.seg, loc.local, loc.length);
 });
 on('loading', e => $('#btn-play').classList.toggle('loading', !!e.detail));
 on('notice', e => toast(e.detail.message, { duration: 7000 }));
@@ -701,7 +760,7 @@ on('state', () => {
   if (speaker.state !== 'playing') updateFollowButton();
 });
 on('error', e => {
-  if (e.detail.code === 'quota' && speaker === engines.neural) {
+  if (e.detail.code === 'quota' && speaker !== engines.browser) {
     state.engineFallback = true;
     toast(`${e.detail.message} Je continue avec la voix de l'appareil (rien n'est facturé).`, {
       type: 'error', duration: 9000,
@@ -907,9 +966,45 @@ function chapterItem(ch, { onClick, current } = {}) {
   return b;
 }
 
+function renderNews() {
+  const items = state.news || [];
+  $('#news-card').hidden = !items.length;
+  const list = $('#news-list');
+  list.innerHTML = '';
+  items.forEach(n => {
+    const li = document.createElement('li');
+    li.className = 'news-item';
+    li.innerHTML = '<div class="ni-main"><div class="ni-title"></div><div class="ni-sub"></div></div>';
+    li.querySelector('.ni-title').textContent = n.title || 'Chapitre suivant';
+    li.querySelector('.ni-sub').textContent = `${n.series} · après « ${n.after} »`;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn small primary';
+    b.textContent = '▶ Écouter';
+    b.onclick = () => loadUrl(n.url, { autoplay: true });
+    li.append(b);
+    list.append(li);
+  });
+  $('#btn-notify').hidden = typeof Notification === 'undefined' || Notification.permission !== 'default';
+  // pastille sur le bouton Bibliothèque
+  let badge = $('#btn-library .lib-badge');
+  if (items.length && !badge) { badge = document.createElement('span'); badge.className = 'lib-badge'; $('#btn-library').append(badge); }
+  if (badge) { if (items.length) badge.textContent = items.length; else badge.remove(); }
+}
+
+async function refreshNews(force = false) {
+  try {
+    state.news = await checkNewChapters({ force });
+    renderNews();
+    notifyNew(state.news);
+    if (openDrawer?.id === 'library') renderLibrary();
+  } catch (e) { console.info('Vérification des nouveautés impossible', e.message); }
+}
+
 async function renderHome() {
   const all = await db.listChapters().catch(() => []);
   state.knownIds = new Set(all.map(c => c.id));
+  renderNews();
   const resume = all.find(c => (c.progress?.pct || 0) > 0.01 && (c.progress?.pct || 0) < 0.99) || null;
   const rc = $('#resume-card');
   rc.hidden = !resume;
@@ -947,44 +1042,67 @@ async function renderLibrary() {
   if (!filtered.length) {
     list.innerHTML = `<div class="lib-empty">${all.length ? 'Aucun résultat.' : 'Ta bibliothèque est vide.<br>Les chapitres que tu ouvres seront gardés ici.'}</div>`;
   }
-  // Groupé par site
-  const groups = new Map();
-  filtered.forEach(c => {
-    const k = c.siteName || 'Autres';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(c);
-  });
-  groups.forEach((items, name) => {
-    const h = document.createElement('div');
-    h.className = 'lib-group-title';
-    h.textContent = `${name} · ${items.length}`;
-    list.append(h);
-    items.forEach(c => {
-      const row = document.createElement('div');
-      row.className = 'lib-row';
-      row.append(chapterItem(c, {
-        current: state.chapter?.id === c.id,
-        onClick: () => { closeDrawers(); navigateToChapter(c.id, { autoplay: false }); },
-      }));
-      const del = document.createElement('button');
-      del.className = 'icon-btn';
-      del.type = 'button';
-      del.title = 'Supprimer';
-      del.setAttribute('aria-label', 'Supprimer ' + c.title);
-      del.innerHTML = '<svg><use href="#i-trash"/></svg>';
-      del.onclick = async () => {
-        if (!confirm(`Supprimer « ${c.title} » de la bibliothèque ?`)) return;
-        await db.deleteChapter(c.id);
-        recordDeletion('chapters', c.id);
-        sync.schedulePush(2000);
-        state.knownIds.delete(c.id);
-        renderLibrary();
-        if (state.chapter?.id === c.id) goHome();
-        else if (!$('#view-home').hidden) renderHome();
-      };
-      row.append(del);
-      list.append(row);
+  // Groupé par série, puis par arc
+  const makeRow = c => {
+    const row = document.createElement('div');
+    row.className = 'lib-row';
+    row.append(chapterItem(c, {
+      current: state.chapter?.id === c.id,
+      onClick: () => { closeDrawers(); navigateToChapter(c.id, { autoplay: false }); },
+    }));
+    const del = document.createElement('button');
+    del.className = 'icon-btn';
+    del.type = 'button';
+    del.title = 'Supprimer';
+    del.setAttribute('aria-label', 'Supprimer ' + c.title);
+    del.innerHTML = '<svg><use href="#i-trash"/></svg>';
+    del.onclick = async () => {
+      if (!confirm(`Supprimer « ${c.title} » de la bibliothèque ?`)) return;
+      await db.deleteChapter(c.id);
+      recordDeletion('chapters', c.id);
+      sync.schedulePush(2000);
+      state.knownIds.delete(c.id);
+      renderLibrary();
+      if (state.chapter?.id === c.id) goHome();
+      else if (!$('#view-home').hidden) renderHome();
+    };
+    row.append(del);
+    return row;
+  };
+  groupLibrary(filtered).forEach((ser, si) => {
+    const box = document.createElement('section');
+    box.className = 'lib-series';
+    const head = document.createElement('div');
+    head.className = 'lib-series-head';
+    head.innerHTML = `<span></span><small>${ser.done}/${ser.count} terminés</small>`;
+    head.firstChild.textContent = ser.name;
+    box.append(head);
+    const news = (state.news || []).filter(n => n.series === ser.name);
+    news.forEach(n => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small primary';
+      b.style.margin = '.3rem 0';
+      b.textContent = `✨ Nouveau : ${n.title || 'chapitre suivant'}`;
+      b.onclick = () => { closeDrawers(); loadUrl(n.url, { autoplay: true }); };
+      box.append(b);
     });
+    ser.arcs.forEach((arc, ai) => {
+      const rows = arc.chapters.map(makeRow);
+      if (!arc.arc && ser.arcs.length === 1) { const inner = document.createElement('div'); inner.className = 'lib-list-inner'; rows.forEach(r => inner.append(r)); box.append(inner); return; }
+      const det = document.createElement('details');
+      det.className = 'lib-arc';
+      det.open = q ? true : (si === 0 && ai === 0);
+      const pct = Math.round((arc.done / Math.max(1, arc.chapters.length)) * 100);
+      det.innerHTML = `<summary><span></span><span>${arc.chapters.length} lu${arc.chapters.length > 1 ? 's' : ''} · ${arc.done} terminé${arc.done > 1 ? 's' : ''}</span></summary><div class="arc-bar"><i style="width:${pct}%"></i></div>`;
+      det.querySelector('summary span').textContent = arc.arc || 'Autres chapitres';
+      const inner = document.createElement('div');
+      inner.className = 'lib-list-inner';
+      rows.forEach(r => inner.append(r));
+      det.append(inner);
+      box.append(det);
+    });
+    list.append(box);
   });
   const est = await db.storageEstimate();
   $('#lib-usage').textContent = `${all.length} chapitre(s)` + (est?.usage ? ` · ${(est.usage / 1048576).toFixed(1)} Mo utilisés` : '');
@@ -1006,7 +1124,7 @@ const RANGE_FORMAT = {
   expressiveness: v => `${Math.round(v * 100)} %`,
   musicVolume: v => `${Math.round(v * 100)} %`,
 };
-const BOOL_KEYS = ['indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages', 'fluid', 'musicAuto', 'musicFollowVoice'];
+const BOOL_KEYS = ['multiVoice', 'hybrid', 'indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages', 'fluid', 'musicAuto', 'musicFollowVoice'];
 const TEXT_KEYS = ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'];
 
 function elevenVoiceOptions() {
@@ -1108,6 +1226,21 @@ function buildSettingsUI() {
     } catch (err) { toast(err.message, { type: 'error' }); }
   });
   $('#eleven-quota-btn').addEventListener('click', () => showElevenQuota());
+  $('#album-prepare').addEventListener('click', () => prepareChapterAudio());
+  $('#album-download').addEventListener('click', () => downloadAlbum());
+  $('#dict-add').addEventListener('submit', e => {
+    e.preventDefault();
+    const from = $('#dict-from').value.trim(); const to = $('#dict-to').value.trim();
+    if (!from || !to) return;
+    const all = getDict().filter(d => d.from.toLowerCase() !== from.toLowerCase());
+    all.push({ from, to });
+    setDict(all);
+    $('#dict-from').value = ''; $('#dict-to').value = '';
+    renderDict();
+    sync.schedulePush();
+    rebuildItems();
+    toast(`« ${from} » sera prononcé « ${to} ».`);
+  });
   $('#audio-cache-clear').addEventListener('click', async () => {
     await db.clearAudio();
     toast('Cache audio vidé.');
@@ -1160,6 +1293,7 @@ function syncSettingsUI() {
   $('#set-customProxy').value = s.customProxy || '';
   $('#set-engine').value = s.engine;
   $$('.engine-panel').forEach(pn => { pn.hidden = pn.dataset.engine !== s.engine; });
+  if ($('#hybrid-box')) $('#hybrid-box').hidden = s.engine === 'browser';
   $('#audio-cache-clear').hidden = s.engine === 'browser';
   TEXT_KEYS.forEach(k => { const el = $('#set-' + k); if (el && document.activeElement !== el) el.value = s[k] || ''; });
   $('#btn-speed').textContent = `${String(s.rate).replace('.', ',')}×`;
@@ -1178,7 +1312,7 @@ onSettingsChange((s, patch) => {
     if (state.chapter) updateProgressUI(Math.max(0, state.currentSeg));
   }
   if (['engine', 'openaiKey', 'elevenKey', 'elevenModel', 'openaiModel'].some(k => k in patch)) state.engineFallback = false;
-  if ('engine' in patch || 'fluid' in patch || 'expressiveness' in patch
+  if ('engine' in patch || 'fluid' in patch || 'expressiveness' in patch || 'multiVoice' in patch || 'hybrid' in patch
     || (s.engine !== 'browser' && ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'].some(k => k in patch))) {
     rebuildItems();
   }
@@ -1199,6 +1333,187 @@ onSettingsChange((s, patch) => {
     state.relayout = setTimeout(() => { reader.lastLineTop = null; reader.updateMarker(false); }, 120);
   }
 });
+
+// =====================================================================
+// Voix des personnages & prononciation
+// =====================================================================
+
+function voiceOptionsFor(kind) {
+  if (kind === 'eleven') return elevenVoiceOptions();
+  if (kind === 'openai') return OPENAI_VOICES;
+  const { same } = sortedVoices(state.chapter?.lang || 'fr');
+  return same.map(v => [v.voiceURI, voiceLabel(v)]);
+}
+
+function testRole(role, sample) {
+  const s = getSettings();
+  const r = getCast(seriesKey(state.chapter))[role] || {};
+  const text = prepareSpeech(sample || 'Bonjour, voici ma voix.', { dict: getDict(), stripSpeaker: true }).spoken.slice(0, 160);
+  if (speaker.playing) speaker.pause();
+  const useBrowser = s.engine === 'browser' || state.engineFallback;
+  if (useBrowser) {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = [...sortedVoices(state.chapter?.lang || 'fr').same].find(x => x.voiceURI === r.browser?.uri);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = s.rate; u.pitch = s.pitch * (r.browser?.pitch || 1);
+    speechSynthesis.speak(u);
+    return;
+  }
+  const t = new AudioSpeaker();
+  t.addEventListener('error', e => toast(e.detail.message, { type: 'error', duration: 7000 }));
+  t.setItems([{ text, mood: 'calme', dialogue: true, elevenVoice: r.eleven, openaiVoice: r.openai }], 'fr-FR');
+  t.configure({ rate: s.rate, volume: s.volume });
+  t.playFrom(0, 0);
+}
+
+// ---------------------------------------------------------------------
+// Audio du chapitre entier (une piste : écoute écran éteint + MP3)
+
+function renderAlbumBox() {
+  const s = getSettings();
+  const box = $('#album-box');
+  if (!box) return;
+  box.hidden = s.engine === 'browser';
+  const album = engines.neural.album;
+  $('#album-download').hidden = !album || speaker !== engines.neural;
+  if (s.hybrid && s.engine !== 'browser') $('#album-status').textContent = 'Indisponible en mode économie (la narration est lue par l\'appareil, qui ne peut pas être enregistrée).';
+  else if (album && speaker === engines.neural) $('#album-status').textContent = `✓ Piste prête : ${fmtDuration(album.total)} — elle continue écran verrouillé.`;
+  else if (!state.albumBusy) $('#album-status').textContent = '';
+}
+
+async function prepareChapterAudio() {
+  const s = getSettings();
+  if (!state.chapter) { toast('Ouvre d\'abord un chapitre.'); return; }
+  if (speaker !== engines.neural) { toast(s.hybrid ? 'Désactive le mode économie pour préparer l\'audio complet.' : 'Choisis une voix IA (OpenAI ou ElevenLabs).', { type: 'error' }); return; }
+  if (state.albumBusy) { state.albumBusy.abort(); return; }
+  const pending = await speaker.pendingChars();
+  if (pending > 0) {
+    let msg = `Préparer tout le chapitre va générer ≈ ${pending.toLocaleString('fr-FR')} caractères de voix IA.`;
+    if (s.engine === 'elevenlabs') {
+      try {
+        const q = await getElevenQuota(s.elevenKey);
+        const left = Math.max(0, q.limit - q.used);
+        msg += `\nIl te reste ${left.toLocaleString('fr-FR')} crédits ElevenLabs${pending > left ? ' : ce ne sera PAS suffisant, la préparation s\'arrêtera quand ils seront épuisés.' : '.'}`;
+      } catch { /* ignore */ }
+    } else msg += `\nCoût OpenAI estimé : ≈ ${(pending / 14.5 / 60 * 0.015).toFixed(2).replace('.', ',')} $.`;
+    if (!confirm(msg + '\n\nContinuer ?')) return;
+  }
+  const ctrl = new AbortController();
+  state.albumBusy = ctrl;
+  const btn = $('#album-prepare');
+  btn.textContent = '✕ Arrêter';
+  const status = $('#album-status');
+  const wasPlaying = speaker.playing;
+  try {
+    await speaker.prepareAlbum({ signal: ctrl.signal, onProgress: (d, n) => { status.textContent = `Préparation… ${d}/${n} passages (${Math.round((d / n) * 100)} %)`; } });
+    toast('🎧 Audio du chapitre prêt : il continuera même écran verrouillé.');
+    if (wasPlaying || speaker.playing) speaker.playFrom(speaker.index, speaker.charIndex || 0);
+  } catch (e) {
+    if (e.name === 'AbortError') status.textContent = 'Préparation arrêtée (les passages déjà générés sont gardés).';
+    else status.textContent = `Arrêté : ${e.message} Les passages déjà générés sont gardés.`;
+  } finally {
+    state.albumBusy = null;
+    btn.textContent = '🎧 Préparer l\'audio du chapitre';
+    renderAlbumBox();
+  }
+}
+
+function downloadAlbum() {
+  const al = engines.neural.album;
+  if (!al || !state.chapter) return;
+  const ext = /wav/.test(al.blob.type) ? 'wav' : 'mp3';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(al.blob);
+  // nom de fichier sûr partout (sans accents ni caractères spéciaux)
+  const safe = state.chapter.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[–—―]/g, '-')
+    .replace(/[^\w .()'-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'chapitre';
+  a.download = `${safe}.${ext}`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+function renderCast() {
+  const box = $('#cast-list');
+  if (!box) return;
+  const s = getSettings();
+  $('#hybrid-box').hidden = s.engine === 'browser';
+  renderAlbumBox();
+  box.innerHTML = '';
+  if (!s.multiVoice) return;
+  if (!state.chapter) { box.innerHTML = '<p class="muted small">Ouvre un chapitre pour voir ses personnages.</p>'; return; }
+  const series = seriesKey(state.chapter);
+  const cast = getCast(series);
+  // moteur qui lira les répliques : IA (si choisie) sinon appareil
+  const kind = s.engine === 'browser' || state.engineFallback ? 'browser' : s.engine === 'elevenlabs' ? 'eleven' : 'openai';
+  const rows = [[UNKNOWN, 'Répliques sans nom', null], ...state.characters.slice(0, 24).map(([n, c]) => [n, n, c])];
+  if (state.characters.length === 0) {
+    box.innerHTML = '<p class="muted small">Aucune réplique « Nom : “…” » dans ce chapitre : la narration et les dialogues gardent la voix principale.</p>';
+  }
+  rows.forEach(([role, label, count]) => {
+    if (role === UNKNOWN && state.characters.length === 0) return;
+    const r = cast[role] || {};
+    const row = document.createElement('div');
+    row.className = 'cast-row';
+    const name = document.createElement('div');
+    name.className = 'cast-name';
+    name.innerHTML = `${label.replace(/[<>&]/g, '')}${count ? ` <small>· ${count} réplique${count > 1 ? 's' : ''}</small>` : ''}`;
+    const test = document.createElement('button');
+    test.type = 'button';
+    test.className = 'btn small';
+    test.textContent = '▶';
+    test.title = 'Écouter';
+    const sampleBlock = state.chapter.blocks.find(b => b.text && detectSpeaker(b.text) === role);
+    test.onclick = () => testRole(role, sampleBlock?.text);
+    const ctrl = document.createElement('div');
+    ctrl.className = 'cast-ctrl';
+    const sel = document.createElement('select');
+    const current = kind === 'browser' ? r.browser?.uri : r[kind];
+    fillSelect(sel, voiceOptionsFor(kind), current || '');
+    sel.onchange = () => {
+      if (kind === 'browser') setRole(series, role, { browser: { uri: sel.value, pitch: r.browser?.pitch || 1 } });
+      else setRole(series, role, { [kind]: sel.value });
+      sync.schedulePush();
+      rebuildItems();
+    };
+    ctrl.append(sel);
+    if (kind === 'browser') {
+      const pitch = document.createElement('select');
+      pitch.className = 'pitch';
+      fillSelect(pitch, PITCHES.map(([v, l]) => [String(v), l]), String(r.browser?.pitch || 1));
+      pitch.onchange = () => {
+        setRole(series, role, { browser: { uri: sel.value, pitch: parseFloat(pitch.value) } });
+        sync.schedulePush();
+        rebuildItems();
+      };
+      ctrl.append(pitch);
+    }
+    row.append(name, test, ctrl);
+    box.append(row);
+  });
+}
+
+function renderDict() {
+  const list = $('#dict-list');
+  if (!list) return;
+  list.innerHTML = '';
+  getDict().forEach((d, i) => {
+    const row = document.createElement('div');
+    row.className = 'dict-row';
+    const t = document.createElement('span');
+    t.textContent = `${d.from} → ${d.to}`;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'icon-btn';
+    del.innerHTML = '<svg><use href="#i-trash"/></svg>';
+    del.title = 'Supprimer';
+    del.onclick = () => { const all = getDict(); all.splice(i, 1); setDict(all); renderDict(); sync.schedulePush(); rebuildItems(); };
+    row.append(t, del);
+    list.append(row);
+  });
+}
 
 // =====================================================================
 // Compte (synchronisation) & crédits ElevenLabs
@@ -1222,6 +1537,7 @@ function renderSync() {
 }
 
 async function refreshAfterPull() {
+  refreshNews();
   await music?.reload();
   if (!$('#view-home').hidden) renderHome();
   if (openDrawer?.id === 'library') renderLibrary();
@@ -1348,7 +1664,8 @@ function renderMusic() {
     thumb.type = 'button';
     thumb.className = 'ost-thumb';
     thumb.title = 'Écouter';
-    thumb.innerHTML = `<img alt="" loading="lazy" src="https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg"><span>▶</span>`;
+    if (t.type === 'file') { thumb.classList.add('file'); thumb.innerHTML = '♪<span>▶</span>'; }
+    else thumb.innerHTML = `<img alt="" loading="lazy" src="https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg"><span>▶</span>`;
     thumb.onclick = () => { music.previewTrack(t); };
     const main = document.createElement('div');
     main.className = 'ost-main';
@@ -1356,6 +1673,7 @@ function renderMusic() {
     title.className = 'ost-title';
     const tt = document.createElement('span');
     tt.textContent = (t.broken ? '⚠️ ' : '') + (t.title || `Vidéo ${t.videoId}`);
+    if (t.type === 'file') { const bf = document.createElement('span'); bf.className = 'badge-file'; bf.textContent = 'fichier · sans pub'; tt.append(bf); }
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'icon-btn';
@@ -1399,6 +1717,7 @@ function setupMusic() {
   music.addEventListener('track', e => {
     const t = e.detail;
     $('#mini-player').hidden = !t;
+    $('#mini-player').classList.toggle('file', t?.type === 'file');
     $('#mini-title').textContent = t ? (t.title || 'Musique') : '';
     if (openDrawer?.id === 'music') renderMusic();
   });
@@ -1413,7 +1732,8 @@ function setupMusic() {
 
   $('#ost-form').addEventListener('submit', async e => {
     e.preventDefault();
-    const url = $('#ost-url').value;
+    const url = $('#ost-url').value.trim();
+    if (!url) { toast('Colle un lien YouTube, ou importe un fichier audio.', { type: 'error' }); return; }
     if (!ostTagSel.size) { toast('Choisis au moins une ambiance pour cette musique.', { type: 'error' }); return; }
     const tags = [...ostTagSel];
     // on vide le formulaire tout de suite (permet d'enchaîner plusieurs ajouts)
@@ -1431,6 +1751,20 @@ function setupMusic() {
     }
   });
   $('#btn-music').addEventListener('click', () => showDrawer('music'));
+  $('#ost-files').addEventListener('change', async e => {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    if (!files.length) return;
+    if (!ostTagSel.size) { toast('Choisis d\'abord au moins une ambiance (étape 1), puis importe tes fichiers.', { type: 'error' }); return; }
+    const tags = [...ostTagSel];
+    let ok = 0;
+    for (const f of files) {
+      try { await music.addFile(f, tags); ok++; } catch (err) { toast(err.message, { type: 'error' }); }
+    }
+    ostTagSel.clear();
+    renderMusic();
+    if (ok) toast(`${ok} fichier${ok > 1 ? 's' : ''} audio ajouté${ok > 1 ? 's' : ''} 🎵 (sans publicité)`);
+  });
   $('#btn-mood').addEventListener('click', e => {
     e.stopPropagation();
     $('#speed-pop').hidden = true; $('#sleep-pop').hidden = true;
@@ -1634,6 +1968,16 @@ async function boot() {
   bindEvents();
   setupMusic();
   setupSync();
+  // Nouveaux chapitres : au démarrage (après la synchro), puis toutes les 30 minutes
+  setTimeout(() => refreshNews(true), sync.enabled ? 4000 : 1500);
+  setInterval(() => refreshNews(), 30 * 60000);
+  $('#btn-notify').addEventListener('click', async () => {
+    try {
+      const p = await Notification.requestPermission();
+      if (p === 'granted') { toast('Alertes activées : tu seras prévenu quand un nouveau chapitre sortira (site ouvert).'); notifyNew(state.news || []); }
+    } catch { /* ignore */ }
+    renderNews();
+  });
   registerSW();
 
   loadVoices().then(() => { fillVoiceSelects(); configureVoice(); });

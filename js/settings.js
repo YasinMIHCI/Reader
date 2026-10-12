@@ -37,7 +37,9 @@ export const DEFAULTS = {
   engine: 'browser',     // browser | openai | elevenlabs
   voiceURI: '',
   expressiveness: 0.6,   // variations de ton (voix de l'appareil)
-  fluid: true,           // enchaîne plusieurs phrases par énoncé (moins de blancs)
+  fluid: true,
+  multiVoice: true,      // une voix par personnage
+  hybrid: false,         // narration appareil + dialogues voix IA           // enchaîne plusieurs phrases par énoncé (moins de blancs)
   openaiKey: '',
   openaiModel: 'gpt-4o-mini-tts',
   openaiVoice: 'coral',

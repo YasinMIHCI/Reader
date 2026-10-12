@@ -241,7 +241,8 @@ export async function fetchWpComAdjacent(site, date, { signal } = {}) {
     const res = await fetchWithTimeout(base + qs, { signal, credentials: 'omit' }, 10000);
     if (!res.ok) return null;
     const data = await res.json();
-    return data?.posts?.[0]?.URL || null;
+    const post = data?.posts?.[0];
+    return post ? { url: post.URL, title: decodeEntities(post.title || '') } : null;
   };
   const d = encodeURIComponent(date);
   const [next, prev] = await Promise.all([
@@ -249,7 +250,17 @@ export async function fetchWpComAdjacent(site, date, { signal } = {}) {
     get(`&order=DESC&order_by=date&before=${d}`).catch(() => null),
   ]);
   const nav = {};
-  if (next) nav.next = next;
-  if (prev) nav.prev = prev;
+  if (next) { nav.next = next.url; nav.nextTitle = next.title; }
+  if (prev) nav.prev = prev.url;
   return nav;
+}
+
+/** Titre d'un article WordPress.com à partir de son adresse (sans proxy). */
+export async function fetchWpComTitle(url) {
+  const u = new URL(url);
+  const slug = slugFromPath(u.pathname);
+  if (!slug) return '';
+  const res = await fetchWithTimeout(`https://public-api.wordpress.com/rest/v1.1/sites/${encodeURIComponent(u.host)}/posts/slug:${encodeURIComponent(slug)}?fields=title`, { credentials: 'omit' }, 8000);
+  if (!res.ok) return '';
+  return decodeEntities((await res.json()).title || '');
 }

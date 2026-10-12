@@ -182,8 +182,16 @@ export async function getAudio(key) {
 export async function saveAudio(key, blob, alignment) {
   return tx(['audio'], 'readwrite', t => { t.objectStore('audio').put({ key, blob, alignment: alignment || null, savedAt: Date.now() }); });
 }
+export async function deleteAudio(key) {
+  return tx(['audio'], 'readwrite', t => { t.objectStore('audio').delete(key); });
+}
+/** Vide le cache des voix IA (garde les musiques importées). */
 export async function clearAudio() {
-  return tx(['audio'], 'readwrite', t => { t.objectStore('audio').clear(); });
+  return tx(['audio'], 'readwrite', async t => {
+    const st = t.objectStore('audio');
+    const keys = await reqP(st.getAllKeys());
+    keys.filter(k => !String(k).startsWith('ost:')).forEach(k => st.delete(k));
+  });
 }
 
 // ---- Export / import (pour transférer sa bibliothèque d'un appareil à l'autre)

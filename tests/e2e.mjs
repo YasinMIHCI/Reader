@@ -42,6 +42,7 @@ const FAKE_TTS = () => {
     current = queue.shift();
     const u = current;
     window.__spoken.push(u.text);
+    (window.__utter ||= []).push({ text: u.text, voice: u.voice?.name || '', pitch: u.pitch });
     timers.push(setTimeout(() => {
       u.onstart?.({});
       const re = /\S+/g; let m; let k = 0;
@@ -98,7 +99,8 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
     if (u.includes('/wp-json/')) return r.fulfill({ status: 404, body: '' });
     // Playwright ne bloque pas le CORS des réponses simulées : on simule le blocage par une erreur réseau
     if (!cors) return r.abort('accessdenied');
-    const body = u.includes('/sommaire') ? fs.readFileSync(path.join(FIX, 'sommaire.html'), 'utf8') : html;
+    const body = u.includes('/sommaire') ? fs.readFileSync(path.join(FIX, 'sommaire.html'), 'utf8')
+      : u.includes('arc-ii') ? fs.readFileSync(path.join(FIX, 'dialogue-chapter.html'), 'utf8') : html;
     return r.fulfill({ status: 200, contentType: 'text/html', headers: { 'Access-Control-Allow-Origin': '*' }, body });
   });
   // Proxy public simulé
@@ -158,10 +160,11 @@ async function newPage(viewport = { width: 1280, height: 860 }, { cors = false, 
   await ctx.route('https://public-api.wordpress.com/**', r => {
     const u = r.request().url();
     log.push(u);
+    if (u.includes('/posts/slug:arc-i-chapitre-3')) return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ title: 'Arc I &#8211; Chapitre 3 : Les volets cloués' }) });
     if (u.includes('/posts/slug:arc-i-chapitre-2')) return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: fs.readFileSync(path.join(FIX, 'wpcom-api.json'), 'utf8') });
     if (u.includes('/posts/?')) {
       const next = u.includes('order=ASC');
-      return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ posts: [{ URL: `https://lac-traductions.wordpress.com/2024/01/0${next ? 3 : 1}/arc-i-chapitre-${next ? 3 : 1}/` }] }) });
+      return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ posts: [{ URL: `https://lac-traductions.wordpress.com/2024/01/0${next ? 3 : 1}/arc-i-chapitre-${next ? 3 : 1}/`, title: next ? 'Arc I &#8211; Chapitre 3 : Les volets cloués' : 'Arc I &#8211; Chapitre 1' }] }) });
     }
     return r.fulfill({ status: 404, headers: { 'Access-Control-Allow-Origin': '*' }, body: '{}' });
   });
@@ -496,6 +499,151 @@ const CH2 = 'https://exemple-roman.test/2024/01/02/arc-i-chapitre-2/';
   check(await page.evaluate(() => JSON.parse(localStorage.getItem('relecteur.settings.v1')).elevenVoice) === 'JBFqnCBsd6RMkjVDRZzb', 'bascule automatique sur une voix gratuite (George)');
   check(log.some(u => u.includes('/JBFqnCBsd6RMkjVDRZzb/')), 'la lecture reprend avec la voix gratuite');
   check(await page.evaluate(() => CSS.highlights.get('tts-word')?.size || 0) === 1, 'ElevenLabs : mot en cours surligné (horodatage exact)');
+  await ctx.close();
+}
+
+const CHD = 'https://exemple-roman.test/2024/01/05/arc-ii-chapitre-1/';
+
+// ---------------------------------------------------------------- 11. Voix par personnage + nettoyage du texte parlé
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.fill('#url-input', CHD);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.seg.current', { timeout: 15000 });
+  await page.waitForTimeout(2500);
+  const ut = await page.evaluate(() => window.__utter.filter(u => u.text.trim()));
+  const mae = ut.find(u => u.text.includes('retard'));
+  const lio = ut.find(u => u.text.includes('marchand de lanternes'));
+  const narr = ut.find(u => u.text.includes('La brume recouvrait'));
+  check(!!mae && !mae.text.includes('Maëlle :'), `nom du personnage retiré de la voix : « ${mae?.text.slice(0, 40)} »`);
+  check(mae && /retard/.test(mae.text) && !/retaaaard/.test(mae.text), 'lettres étirées corrigées (« retaaaard » → « retard »)');
+  check(mae && lio && narr && `${mae.voice}|${mae.pitch.toFixed(2)}` !== `${lio.voice}|${lio.pitch.toFixed(2)}`, `voix différentes pour Maëlle (${mae?.voice} ${mae?.pitch.toFixed(2)}) et Lio (${lio?.voice} ${lio?.pitch.toFixed(2)})`);
+  check(narr && `${narr.voice}|${narr.pitch.toFixed(2)}` !== `${mae?.voice}|${mae?.pitch.toFixed(2)}`, 'narration et personnage ont des voix distinctes');
+  const dash = ut.find(u => u.text.includes('Encore lui'));
+  check(dash && !/—/.test(dash.text), `tirets « —— » remplacés par une pause : « ${dash?.text.slice(0, 50)} »`);
+  check(ut.some(u => u.text.trim() === '…'), 'réplique muette « ———— » lue comme un silence');
+  // surlignage exact malgré le texte modifié : le mot surligné est bien un mot du texte affiché
+  const words = await page.evaluate(async () => {
+    const seen = new Set();
+    for (let i = 0; i < 40; i++) {
+      const h = CSS.highlights.get('tts-word');
+      for (const r of h || []) seen.add(r.toString());
+      await new Promise(r => setTimeout(r, 25));
+    }
+    return [...seen];
+  });
+  check(words.length > 3 && words.every(w => /[\p{L}\p{N}]/u.test(w)), `mots surlignés cohérents (${words.slice(0, 6).join(', ')})`);
+  // Distribution : liste des personnages
+  await page.click('#btn-play');
+  await page.click('#btn-settings');
+  await page.click('[data-tab="voice"]');
+  await page.waitForTimeout(300);
+  const castTxt = await page.textContent('#cast-list');
+  check(castTxt.includes('Maëlle') && castTxt.includes('Lio'), 'personnages détectés dans la distribution');
+  await page.screenshot({ path: `${OUT}/12-personnages.png` });
+  // Dictionnaire de prononciation
+  await page.fill('#dict-from', 'Maëlle');
+  await page.fill('#dict-to', 'Ma-elle');
+  await page.click('#dict-add button');
+  await page.waitForTimeout(300);
+  check((await page.textContent('#dict-list')).includes('Maëlle → Ma-elle'), 'dictionnaire : correction ajoutée');
+  await page.click('#settings [data-close]');
+  await page.evaluate(() => { window.__utter = []; });
+  await page.click('.seg[data-i="1"]');
+  await page.waitForTimeout(800);
+  check(await page.evaluate(() => window.__utter.some(u => u.text.includes('Ma-elle'))), 'dictionnaire : appliqué à la lecture');
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 12. Mode économie : narration appareil, dialogues ElevenLabs
+{
+  const log = [];
+  const { ctx, page } = await newPage(undefined, { cors: true, log });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ engine: 'elevenlabs', elevenKey: 'sk_lib', hybrid: true, showIntro: false })));
+  await page.reload();
+  page.on('request', r => { if (r.url().includes('text-to-speech')) log.push('tts:' + (r.postDataJSON()?.text || '')); });
+  await page.fill('#url-input', CHD);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.waitForTimeout(5000);
+  const ttsTexts = log.filter(l => l.startsWith('tts:')).map(l => l.slice(4));
+  const local = await page.evaluate(() => window.__spoken.filter(t => t.trim()));
+  check(ttsTexts.length > 0 && ttsTexts.every(t => !t.includes('La brume recouvrait')), `mode économie : la narration n'est pas envoyée à ElevenLabs (${ttsTexts.length} passages IA)`);
+  check(ttsTexts.some(t => t.includes('retard')), 'mode économie : les dialogues utilisent ElevenLabs');
+  check(local.some(t => t.includes('La brume recouvrait')), 'mode économie : la narration est lue par l\'appareil');
+  const cost = ttsTexts.join('').length; const all = await page.evaluate(() => [...document.querySelectorAll('.seg')].map(s => s.textContent).join('').length);
+  check(cost < all * 0.6, `crédits économisés : ${cost} caractères IA sur ${all}`);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 13. Audio du chapitre entier (une piste)
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ engine: 'openai', openaiKey: 'sk-test', showIntro: false })));
+  await page.reload();
+  await page.fill('#url-input', CHD);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.waitForTimeout(800);
+  await page.click('#btn-play');
+  await page.click('#btn-settings');
+  await page.click('[data-tab="voice"]');
+  page.once('dialog', d => d.accept());
+  await page.click('#album-prepare');
+  await page.waitForFunction(() => /Piste prête/.test(document.querySelector('#album-status').textContent), null, { timeout: 20000 }).catch(() => {});
+  check(/Piste prête/.test(await page.textContent('#album-status')), `audio du chapitre préparé : ${await page.textContent('#album-status')}`);
+  check(await page.isVisible('#album-download'), 'bouton de téléchargement disponible');
+  const dl = page.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+  await page.click('#album-download');
+  const d = await dl;
+  check(!!d && /Chapitre 1/.test(d.suggestedFilename()), `fichier téléchargé : ${d?.suggestedFilename()}`);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 14. Suivi de série + nouveaux chapitres
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => localStorage.setItem('relecteur.settings.v1', JSON.stringify({ prefetchNext: false, showIntro: false })));
+  await page.goto(BASE + '?nointro&url=' + encodeURIComponent('https://lac-traductions.wordpress.com/2024/01/02/arc-i-chapitre-2/'));
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.fill('#url-input', CHD).catch(() => {});
+  await page.goto(BASE + '?nointro&url=' + encodeURIComponent(CHD));
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.click('#btn-play');
+  await page.goto(BASE + '?nointro#/');
+  await page.waitForSelector('#news-card:not([hidden])', { timeout: 8000 }).catch(() => {});
+  check(await page.isVisible('#news-card'), 'carte « Nouveaux chapitres » affichée');
+  check(/chapitre 3/i.test(await page.textContent('#news-list')), `nouveau chapitre détecté : ${(await page.textContent('#news-list')).slice(0, 60)}`);
+  check(await page.locator('#btn-library .lib-badge').count() === 1, 'pastille sur la bibliothèque');
+  await page.click('#btn-library');
+  await page.waitForSelector('.lib-series');
+  const lib = await page.textContent('#lib-list');
+  check(/Arc I/.test(lib) && /Arc II/.test(lib), 'bibliothèque groupée par arc');
+  await page.screenshot({ path: `${OUT}/13-series.png` });
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 15. Musiques en fichiers audio (sans pub)
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.click('#btn-music');
+  await page.click('#ost-tags button:has-text("Calme")');
+  await page.click('#ost-tags button:has-text("Mystère")');
+  await page.setInputFiles('#ost-files', { name: 'theme_du_lac.wav', mimeType: 'audio/wav', buffer: silentWav(3) });
+  await page.waitForSelector('.ost-item');
+  check((await page.textContent('#ost-list')).includes('theme du lac') && (await page.textContent('#ost-list')).includes('sans pub'), 'fichier audio importé dans la bibliothèque');
+  await page.click('#music [data-close]');
+  await page.fill('#url-input', CHD);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.seg.current', { timeout: 15000 });
+  await page.waitForTimeout(3500);
+  check(await page.evaluate(() => document.querySelector('#mini-player').classList.contains('file') && !document.querySelector('#mini-player').hidden), 'la musique importée se lance (lecteur sans vidéo ni pub)');
+  check(await page.evaluate(() => (window.__ytLoads || []).length) === 0, 'aucun lecteur YouTube utilisé');
   await ctx.close();
 }
 
