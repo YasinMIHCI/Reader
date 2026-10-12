@@ -501,6 +501,44 @@ body:not(.has-player) .mini-player { bottom: calc(16px + var(--safe-b)); }
 .mini-player.file .mini-info { display: flex !important; padding-top: .6rem; }
 .badge-file { font-size: .68rem; padding: .05rem .4rem; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); margin-left: .3rem; white-space: nowrap; }
 
+/* Teinte d'ambiance : la couleur de fond glisse doucement selon la scène */
+.mood-tint {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-color: var(--mood-c, transparent); opacity: 0;
+  -webkit-mask-image: radial-gradient(120% 70% at 50% 0%, #000 0%, transparent 70%), radial-gradient(90% 60% at 50% 110%, #000 0%, transparent 70%);
+  mask-image: radial-gradient(120% 70% at 50% 0%, #000 0%, transparent 70%), radial-gradient(90% 60% at 50% 110%, #000 0%, transparent 70%);
+  transition: background-color 2.5s ease, opacity 1.5s ease;
+}
+:root[data-mood] .mood-tint { opacity: var(--mood-a, .22); }
+:root[data-mood="calme"] { --mood-c: #6fbf9a; }
+:root[data-mood="joyeux"] { --mood-c: #f2c14e; }
+:root[data-mood="romantique"] { --mood-c: #ff8fb8; }
+:root[data-mood="triste"] { --mood-c: #4a78c9; }
+:root[data-mood="tension"] { --mood-c: #c97b2e; }
+:root[data-mood="action"] { --mood-c: #e0402e; }
+:root[data-mood="epique"] { --mood-c: #ff9a2e; }
+:root[data-mood="mystere"] { --mood-c: #7a6fd6; }
+:root[data-mood="effrayant"] { --mood-c: #5a0f2a; --mood-a: .32; }
+[data-theme="clair"], [data-theme="sepia"], [data-theme="givre"] { --mood-a: .14; }
+main { position: relative; z-index: 1; }
+
+.recap-card { font-family: var(--ui-font); font-size: .95rem; line-height: 1.55; margin: 0 0 2rem; padding: 1rem 1.1rem; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-left: 3px solid var(--accent-2); }
+.recap-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .6rem; margin-bottom: .4rem; }
+.recap-head b { font-family: var(--title-font); font-size: 1.05rem; }
+.recap-head span { color: var(--muted); font-size: .82rem; }
+.recap-card ul { margin: .3rem 0 .7rem; padding-left: 1.2rem; display: grid; gap: .3rem; }
+.recap-card .recap-ai { font-size: .72rem; color: var(--accent); margin-left: .3rem; }
+
+.dl-bar { position: fixed; z-index: 45; left: 50%; transform: translateX(-50%); top: calc(var(--topbar-h) + 10px); width: min(520px, calc(100vw - 2rem));
+  display: flex; align-items: center; gap: .7rem; padding: .6rem .8rem; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); animation: viewIn .3s var(--ease); }
+.dl-info { flex: 1; min-width: 0; font-size: .85rem; }
+.dl-info span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-progress { height: 4px; border-radius: 4px; background: var(--border); margin-top: .35rem; overflow: hidden; }
+.dl-progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .4s; }
+.chapter-end .dl-next { margin-top: 1rem; }
+.toc-box > .btn { margin: .6rem 0 .2rem; }
+
 /* ---------- Chargement ---------- */
 .loading { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: viewIn .25s; }
 .loading-box { text-align: center; padding: 2rem; max-width: 90vw; }

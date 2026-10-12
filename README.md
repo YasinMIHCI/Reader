@@ -67,6 +67,13 @@ La clé n'est stockée que dans ton navigateur et n'est envoyée qu'au service c
 
 Avec une voix IA, Réglages → Voix → **Préparer l'audio du chapitre** : tout le chapitre est généré puis assemblé en une seule piste audio, qui continue écran verrouillé (boutons du casque / de la voiture) et peut être téléchargée en MP3. Le coût est annoncé avant de commencer ; les passages déjà générés ne sont jamais refacturés.
 
+## Récap, ambiance et lecture hors ligne
+
+- **Récap « Précédemment… »** : en ouvrant un chapitre, une carte résume le chapitre précédent (les moments clés, surtout de la fin), avec un bouton pour l'écouter. Avec une clé OpenAI, le bouton « ✨ Résumé IA » rédige un vrai résumé (mis en mémoire). Désactivable dans Réglages → Voix → Lecture.
+- **Couleurs selon l'ambiance** : le fond se teinte doucement selon la scène (bleu pour la tristesse, rouge pour l'action, vert pour le calme…). Réglages → Apparence.
+- **Détection d'ambiance** fiabilisée : un combat avec de la douleur, du sang ou un moment de désespoir reste « Action » ; une musique qui contredit la scène s'éteint en fondu si aucune OST ne correspond (et Re:Lecteur te dit quel tag ajouter).
+- **Télécharger un arc entier dans le navigateur** : sur une page de sommaire, « 📥 Tout télécharger » ; en fin de chapitre, « 📥 Télécharger la suite » (suit les liens « chapitre suivant »). Les chapitres et leurs images sont enregistrés dans le navigateur (pas de fichiers sur ton ordinateur) et se lisent ensuite sans réseau.
+
 ## Séries & nouveaux chapitres
 
 La bibliothèque est groupée par série puis par arc (« Arc VII · 12 lus · 9 terminés »). Re:Lecteur vérifie régulièrement si un chapitre plus récent est sorti (sites WordPress) : il apparaît dans la carte **✨ Nouveaux chapitres** de l'accueil, avec une pastille sur la bibliothèque, et une notification si tu actives les alertes (le site doit être ouvert).
@@ -148,6 +155,7 @@ js/speech.js            texte parlé (nettoyage, dictionnaire, correspondance de
 js/cast.js              voix des personnages (par série)
 js/hybrid.js            mode économie : narration appareil + dialogues voix IA
 js/series.js            séries, arcs et détection des nouveaux chapitres
+js/recap.js             récap « Précédemment… » (résumé automatique, option IA)
 js/reader.js            rendu, surlignage, marqueur de voix, défilement automatique
 js/intro.js             intro animée de 5 s (canvas)
 js/db.js                stockage local (IndexedDB) + export/import

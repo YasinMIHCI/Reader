@@ -647,6 +647,96 @@ const CHD = 'https://exemple-roman.test/2024/01/05/arc-ii-chapitre-1/';
   await ctx.close();
 }
 
+// ---------------------------------------------------------------- 16. Détection d'ambiance (banc d'essai) + teinte
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  const bench = JSON.parse(fs.readFileSync(path.join(FIX, 'mood-bench.json'), 'utf8'));
+  const res = await page.evaluate(async b => {
+    const m = await import('./js/mood.js');
+    return b.map(sc => {
+      const r = m.analyzeChapter(sc.paras.map(t => ({ type: 'p', text: t })));
+      const maj = Object.entries(r.reduce((a, x) => (a[x] = (a[x] || 0) + 1, a), {})).sort((x, y) => y[1] - x[1])[0][0];
+      return { expect: sc.expect, maj, all: r };
+    });
+  }, bench);
+  const bad = res.filter(r => r.maj !== r.expect);
+  check(bad.length === 0, `ambiances reconnues : ${res.length - bad.length}/${res.length}${bad.length ? ' — ' + bad.map(b => b.expect + '→' + b.maj).join(', ') : ''}`);
+  const fights = res.filter(r => r.expect === 'action');
+  check(fights.every(r => !r.all.includes('triste')), 'aucun passage de combat classé « triste » (même avec douleur, sang, désespoir)');
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.seg.current', { timeout: 15000 });
+  await page.waitForTimeout(600);
+  check(!!(await page.evaluate(() => document.documentElement.dataset.mood)), `teinte d'ambiance appliquée (${await page.evaluate(() => document.documentElement.dataset.mood)})`);
+  await page.click('#btn-play');
+  await page.click('#brand');
+  await page.waitForTimeout(300);
+  check(!(await page.evaluate(() => document.documentElement.dataset.mood)), 'teinte retirée sur l\'accueil');
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 17. Récap « Précédemment… »
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.goto(BASE + '?nointro&url=' + encodeURIComponent(CH2));
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.click('#btn-play');
+  await page.evaluate(async () => { const db = await import('./js/db.js'); const c = (await db.listChapters())[0]; await db.updateChapter(c.id, { progress: { seg: 20, pct: 0.9 } }); });
+  await page.goto(BASE + '?nointro&url=' + encodeURIComponent(CHD));
+  await page.waitForSelector('.recap-card', { timeout: 8000 }).catch(() => {});
+  const recap = await page.$eval('.recap-card', el => el.textContent).catch(() => '');
+  check(recap.includes('Précédemment') && recap.includes('La lanterne du quai'), 'récap du chapitre précédent affiché');
+  const items = await page.$$eval('.recap-card li', l => l.map(x => x.textContent));
+  check(items.length >= 3 && items.some(t => /lanterne|Milo|quai/.test(t)), `récap pertinent (${items.length} points : « ${items[items.length - 1]?.slice(0, 50)}… »)`);
+  await page.click('#btn-play');
+  await page.evaluate(() => { window.__utter = []; });
+  await page.click('.recap-card button:has-text("Écouter")');
+  await page.waitForTimeout(400);
+  check(await page.evaluate(() => (window.__utter || []).some(u => u.text.startsWith('Précédemment'))), 'récap lu à voix haute');
+  await page.screenshot({ path: `${OUT}/14-recap.png` });
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- 18. Télécharger un arc dans le navigateur
+{
+  const log = [];
+  const { ctx, page } = await newPage(undefined, { cors: true, log });
+  await page.goto(BASE + '?nointro');
+  await page.evaluate(() => { document.querySelector('#url-input').value = 'https://exemple-roman.test/sommaire/'; });
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.toc-box .btn', { timeout: 15000 });
+  check((await page.textContent('.toc-box .btn')).includes('10 chapitres'), 'bouton « Tout télécharger » sur le sommaire');
+  await page.click('.toc-box .btn');
+  check(await page.isVisible('#dl-bar'), 'barre de progression du téléchargement');
+  await page.waitForFunction(() => /enregistré/.test(document.querySelector('#toasts').textContent), null, { timeout: 30000 }).catch(() => {});
+  const n = await page.evaluate(async () => { const db = await import('./js/db.js'); return (await db.listChapters()).filter(c => !c.isIndex).length; });
+  check(n === 10, `10 chapitres enregistrés dans le navigateur (${n})`);
+  check(await page.locator('.toc-link.known').count() === 10, 'sommaire : chapitres marqués « en mémoire »');
+  // hors ligne : plus aucune requête vers le site pour les relire
+  log.length = 0;
+  await page.goto(BASE + '?nointro&url=' + encodeURIComponent('https://exemple-roman.test/2024/01/04/arc-i-chapitre-4/'));
+  await page.waitForSelector('.chapter-title', { timeout: 8000 });
+  await page.waitForTimeout(400);
+  check(!log.some(u => u.includes('chapitre-4') && !u.includes('/wp-content/')), 'chapitre téléchargé relu sans réseau');
+  await ctx.close();
+}
+{
+  const { ctx, page } = await newPage(undefined, { cors: true });
+  await page.goto(BASE + '?nointro');
+  await page.fill('#url-input', CH2);
+  await page.click('#url-form button[type=submit]');
+  await page.waitForSelector('.chapter-title', { timeout: 15000 });
+  await page.click('#btn-play');
+  page.once('dialog', d => d.accept('5'));
+  await page.click('.chapter-end .dl-next');
+  await page.waitForFunction(() => /enregistré/.test(document.querySelector('#toasts').textContent), null, { timeout: 30000 }).catch(() => {});
+  const t = await page.textContent('#toasts');
+  check(/1 chapitre\(s\) enregistré/.test(t), `« Télécharger la suite » suit les liens et s'arrête en fin de série : ${t.slice(0, 70)}`);
+  await ctx.close();
+}
+
 // ---------------------------------------------------------------- 5. Intro animée
 {
   // captures à des instants précis

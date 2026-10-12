@@ -11,6 +11,7 @@ import { AudioSpeaker, OPENAI_VOICES, OPENAI_MODELS, ELEVEN_MODELS, ELEVEN_DEFAU
 import { SyncManager, recordDeletion } from './sync.js';
 import { HybridSpeaker } from './hybrid.js';
 import { groupLibrary, checkNewChapters, notifyNew } from './series.js';
+import { extractiveRecap, aiRecap } from './recap.js';
 import { prepareSpeech, toDisplay, detectSpeaker, getDict, setDict } from './speech.js';
 import { ensureRoles, getCast, setRole, NARRATOR, UNKNOWN, PITCHES } from './cast.js';
 import { analyzeChapter, MOODS, moodById, MOOD_PROSODY } from './mood.js';
@@ -182,6 +183,7 @@ function showView(name) {
   $('#topbar-title').classList.toggle('show', name === 'reader');
   $('#follow-btn').hidden = true;
   if (name === 'home') {
+    delete document.documentElement.dataset.mood;
     $('#topbar').classList.remove('tucked');
     document.title = 'Re:Lecteur';
   }
@@ -311,6 +313,7 @@ async function openChapter(id, { autoplay = false, startSeg = null } = {}) {
     imageUrl: (b, i) => urlByKey[`${id}#${i}`] || b.src,
     onNav: (kind, url) => goNav(kind, url),
     onIndexLink: href => loadUrl(href, { autoplay: true }),
+    onDownload: kind => (kind === 'index' ? downloadIndex(chapter) : downloadFollowing(chapter)),
     knownIds: state.knownIds,
     readTitle: s.readTitle,
     estimateSeconds: () => speaker.totalSeconds(),
@@ -351,6 +354,8 @@ async function openChapter(id, { autoplay = false, startSeg = null } = {}) {
   db.updateChapter(id, { lastReadAt: Date.now() });
 
   if (autoplay && total) playSeg(seg);
+
+  showRecap(chapter);
 
   // Tâches de fond : navigation entre chapitres + images
   discoverNav(chapter);
@@ -703,7 +708,15 @@ function updateMood(seg) {
   renderMoodChip();
 }
 
+function applyMoodTint() {
+  const on = getSettings().moodTheme && state.chapter && !$('#view-reader').hidden;
+  const mood = music?.mood || state.sceneMood;
+  if (on && mood) document.documentElement.dataset.mood = mood;
+  else delete document.documentElement.dataset.mood;
+}
+
 function renderMoodChip() {
+  applyMoodTint();
   const m = moodById(music?.mood || state.sceneMood || 'calme');
   $('#mood-emoji').textContent = m.emoji;
   $('#mood-label').textContent = m.label;
@@ -1124,7 +1137,7 @@ const RANGE_FORMAT = {
   expressiveness: v => `${Math.round(v * 100)} %`,
   musicVolume: v => `${Math.round(v * 100)} %`,
 };
-const BOOL_KEYS = ['multiVoice', 'hybrid', 'indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages', 'fluid', 'musicAuto', 'musicFollowVoice'];
+const BOOL_KEYS = ['showRecap', 'moodTheme', 'multiVoice', 'hybrid', 'indent', 'highlightWord', 'highlightSentence', 'focusMode', 'autoScroll', 'readTitle', 'autoNext', 'prefetchNext', 'keepAwake', 'showIntro', 'downloadImages', 'fluid', 'musicAuto', 'musicFollowVoice'];
 const TEXT_KEYS = ['openaiKey', 'openaiModel', 'openaiVoice', 'elevenKey', 'elevenModel', 'elevenVoice'];
 
 function elevenVoiceOptions() {
@@ -1318,6 +1331,7 @@ onSettingsChange((s, patch) => {
   }
   if ('elevenVoice' in patch) fillSelect($('#set-elevenVoice'), elevenVoiceOptions(), s.elevenVoice);
   if ('musicVolume' in patch) music?.applyVolume();
+  if ('moodTheme' in patch) applyMoodTint();
   if ('musicAuto' in patch && !s.musicAuto) music?.stop();
   if ('scrollAnchor' in patch) reader.anchor = s.scrollAnchor;
   if ('autoScroll' in patch) reader.autoScroll = s.autoScroll;
@@ -1333,6 +1347,174 @@ onSettingsChange((s, patch) => {
     state.relayout = setTimeout(() => { reader.lastLineTop = null; reader.updateMarker(false); }, 120);
   }
 });
+
+// =====================================================================
+// Téléchargement d'un arc dans le navigateur (lecture hors ligne)
+// =====================================================================
+
+const dl = { queue: [], running: false, ctrl: null, done: 0, total: 0, failed: 0, label: '' };
+
+function renderDlBar(text) {
+  const bar = $('#dl-bar');
+  bar.hidden = !dl.running;
+  if (!dl.running) return;
+  $('#dl-text').textContent = text || `${dl.label} : ${dl.done}/${dl.total}`;
+  $('#dl-fill').style.width = `${Math.round((dl.done / Math.max(1, dl.total)) * 100)}%`;
+}
+
+/** Adresse du chapitre suivant d'un chapitre (lien de la page, sinon API WordPress.com). */
+async function nextUrlOf(ch) {
+  if (ch.nav?.next) return ch.nav.next;
+  try {
+    const host = new URL(ch.url).host;
+    if (/\.wordpress\.com$/i.test(host) && ch.date) {
+      const nav = await fetchWpComAdjacent(host, ch.date);
+      if (nav.next) { await db.updateChapter(ch.id, { nav: { ...(ch.nav || {}), ...nav } }); return nav.next; }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+async function runDownloads(nextFn) {
+  dl.running = true;
+  dl.ctrl = new AbortController();
+  renderDlBar();
+  const withImages = getSettings().downloadImages;
+  try {
+    while (!dl.ctrl.signal.aborted) {
+      const job = dl.queue.shift() || (nextFn ? await nextFn() : null);
+      if (!job) break;
+      renderDlBar(`${dl.label} : ${dl.done + 1}/${dl.total} — ${job.title || 'chapitre'}…`);
+      try {
+        const id = db.chapterIdFromUrl(job.url);
+        let ch = await db.getChapter(id);
+        if (!ch) {
+          ch = await fetchAndStore(job.url, { signal: dl.ctrl.signal });
+          if (withImages) await downloadImages(ch);
+        }
+        job.after?.(ch);
+      } catch (e) {
+        if (dl.ctrl.signal.aborted) break;
+        dl.failed++;
+        console.info('Téléchargement impossible', job.url, e.message);
+        job.after?.(null);
+      }
+      dl.done++;
+      renderDlBar();
+      await new Promise(r => setTimeout(r, 350)); // reste poli avec le site
+    }
+  } finally {
+    const aborted = dl.ctrl.signal.aborted;
+    dl.running = false;
+    renderDlBar();
+    const ok = dl.done - dl.failed;
+    toast(aborted ? `Téléchargement arrêté : ${ok} chapitre(s) enregistré(s).`
+      : `📥 ${ok} chapitre(s) enregistré(s) dans le navigateur${dl.failed ? ` (${dl.failed} échec(s))` : ''} : lisibles hors ligne.`, { duration: 6000 });
+    dl.queue = [];
+    if (!$('#view-home').hidden) renderHome();
+    if (openDrawer?.id === 'library') renderLibrary();
+    if (state.chapter?.isIndex) { const id = state.chapter.id; state.chapter = null; openChapter(id); }
+  }
+}
+
+function downloadIndex(chapter) {
+  if (dl.running) { toast('Un téléchargement est déjà en cours.'); return; }
+  const links = (chapter.index || []).filter(l => !state.knownIds.has(l.id));
+  if (!links.length) { toast('Tous les chapitres de ce sommaire sont déjà enregistrés.'); return; }
+  if (links.length > 15 && !confirm(`Télécharger ${links.length} chapitres dans le navigateur ? Ça peut prendre quelques minutes.`)) return;
+  dl.queue = links.map(l => ({ url: l.href, title: l.text }));
+  dl.total = links.length; dl.done = 0; dl.failed = 0;
+  dl.label = 'Sommaire';
+  runDownloads();
+}
+
+function downloadFollowing(chapter, count = 10) {
+  if (dl.running) { toast('Un téléchargement est déjà en cours.'); return; }
+  const answer = prompt('Combien de chapitres suivants télécharger dans le navigateur ?', String(count));
+  if (answer === null) return;
+  const n = Math.max(1, Math.min(100, parseInt(answer, 10) || count));
+  dl.total = n; dl.done = 0; dl.failed = 0;
+  dl.label = 'Suite';
+  let cur = chapter;
+  let left = n;
+  const visited = new Set([chapter.id]);
+  // on suit les liens « chapitre suivant » de proche en proche
+  runDownloads(async () => {
+    if (left <= 0 || !cur) return null;
+    const url = await nextUrlOf(cur);
+    const id = url && db.chapterIdFromUrl(url);
+    if (!url || visited.has(id)) { dl.total = dl.done; return null; } // fin de la série (ou boucle)
+    visited.add(id);
+    left--;
+    return { url, title: '', after: ch => { cur = ch; } };
+  });
+}
+
+// =====================================================================
+// Récap « Précédemment… »
+// =====================================================================
+
+async function findPrevious(ch) {
+  if (ch.nav?.prev) {
+    const p = await db.getChapter(db.chapterIdFromUrl(ch.nav.prev));
+    if (p) return p;
+  }
+  // sinon : le chapitre qui précède dans la même série (ordre des arcs et des numéros)
+  const all = await db.listChapters();
+  const ser = groupLibrary(all).find(x => x.name === seriesKey(ch));
+  if (!ser) return null;
+  const flat = [...ser.arcs].reverse().flatMap(a => a.chapters);
+  const i = flat.findIndex(c => c.id === ch.id);
+  return i > 0 ? flat[i - 1] : null;
+}
+
+function speakRecap(lines) {
+  if (!ttsSupported || !lines.length) return;
+  if (speaker.playing) speaker.pause();
+  speechSynthesis.cancel();
+  const s = getSettings();
+  const u = new SpeechSynthesisUtterance(`Précédemment. ${lines.join(' ')}`);
+  const v = pickVoice(s.voiceURI, state.chapter?.lang || 'fr-FR');
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = s.rate; u.pitch = s.pitch; u.volume = s.volume;
+  speechSynthesis.speak(u);
+}
+
+async function showRecap(chapter) {
+  $('#reader .recap-card')?.remove();
+  if (!getSettings().showRecap) return;
+  const prev = await findPrevious(chapter);
+  if (!prev || (prev.progress?.pct || 0) < 0.3 || state.chapter?.id !== chapter.id) return;
+  let lines = prev.recapAI || extractiveRecap(prev);
+  if (!lines.length) return;
+  const card = document.createElement('section');
+  card.className = 'recap-card';
+  card.innerHTML = '<div class="recap-head"><b>📜 Précédemment…</b><span></span></div><ul></ul><div class="row wrap"></div>';
+  card.querySelector('.recap-head span').textContent = `dans « ${prev.title} »`;
+  const fill = (ls, ai) => {
+    const ul = card.querySelector('ul');
+    ul.innerHTML = '';
+    ls.forEach(l => { const li = document.createElement('li'); li.textContent = l; ul.append(li); });
+    if (ai) { const tag = document.createElement('span'); tag.className = 'recap-ai'; tag.textContent = '✨ résumé IA'; card.querySelector('.recap-head').append(tag); }
+  };
+  fill(lines, !!prev.recapAI);
+  const actions = card.querySelector('.row');
+  const mk = (label, fn, cls = 'btn small') => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = label; b.onclick = fn; actions.append(b); return b; };
+  mk('▶ Écouter le récap', () => speakRecap(lines));
+  if (!prev.recapAI && getSettings().openaiKey) {
+    const btn = mk('✨ Résumé IA', async () => {
+      btn.disabled = true; btn.textContent = 'Rédaction…';
+      try {
+        lines = await aiRecap(prev, getSettings().openaiKey);
+        await db.updateChapter(prev.id, { recapAI: lines });
+        fill(lines, true);
+        btn.remove();
+      } catch (e) { toast(e.message, { type: 'error' }); btn.disabled = false; btn.textContent = '✨ Résumé IA'; }
+    });
+  }
+  mk('Masquer', () => card.remove(), 'btn small ghost');
+  $('#reader .chapter-head')?.after(card);
+}
 
 // =====================================================================
 // Voix des personnages & prononciation
@@ -1726,6 +1908,15 @@ function setupMusic() {
     if (music.current) $('#mini-title').textContent = music.current.title || 'Musique';
   });
   music.addEventListener('mood', () => renderMoodChip());
+  const warnedNoMatch = new Set();
+  music.addEventListener('nomatch', e => {
+    const m = moodById(e.detail);
+    if (warnedNoMatch.has(m.id) || !music.tracks.length) return;
+    warnedNoMatch.add(m.id);
+    toast(`${m.emoji} Scène « ${m.label} » : aucune musique avec ce tag. Ajoute-en une pour ce type de scène.`, {
+      duration: 6000, action: { label: 'Musiques', fn: () => showDrawer('music') },
+    });
+  });
   music.addEventListener('change', () => sync.schedulePush());
   music.addEventListener('deleted', e => { recordDeletion('osts', e.detail); sync.schedulePush(2000); });
   $('#mini-player').classList.toggle('small', !!getSettings().miniPlayerSmall);
@@ -1878,6 +2069,7 @@ function bindEvents() {
   });
 
   $('#loading-cancel').addEventListener('click', () => { state.abort?.abort(); hideLoading(); });
+  $('#dl-cancel').addEventListener('click', () => dl.ctrl?.abort());
 
   // Lecteur audio
   $('#btn-play').addEventListener('click', togglePlay);

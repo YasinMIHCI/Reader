@@ -1,0 +1,118 @@
+[
+ {
+  "expect": "action",
+  "paras": [
+   "Le premier coup arriva sans prévenir. Kael roula sur le côté, la lame passa à quelques centimètres de sa gorge.",
+   "Il se releva d'un bond, le souffle court. Son bras gauche saignait, la douleur lui brûlait l'épaule, mais il n'avait pas le temps d'y penser.",
+   "« Encore ! » hurla l'homme masqué en chargeant de nouveau.",
+   "Kael para, recula, para encore. Le choc de l'acier lui fit trembler les os. Il feinta à droite, pivota et frappa de toutes ses forces.",
+   "L'autre s'écrasa contre le mur dans un fracas de pierres. Du sang coulait sur le sol. Kael crut qu'il allait mourir, seul, perdu au fond de cette ruelle — mais il serra les dents et attaqua."
+  ]
+ },
+ {
+  "expect": "action",
+  "paras": [
+   "Le monstre jaillit de la forêt. Ses griffes déchirèrent le tronc d'un arbre comme du papier.",
+   "« Cours ! » cria Nora.",
+   "Ils s'élancèrent entre les racines. Derrière eux, le sol tremblait à chaque pas de la bête. Une explosion de flammes illumina la nuit : Nora venait de lancer son sort.",
+   "La créature rugit, blessée, et se jeta sur eux. Kael dégaina son épée et frappa à l'aveugle. Le choc le projeta en arrière."
+  ]
+ },
+ {
+  "expect": "triste",
+  "paras": [
+   "La chambre était silencieuse. Sur le lit, la vieille femme ne respirait plus.",
+   "Lise prit sa main froide entre les siennes et resta longtemps immobile. Les larmes coulaient sans bruit sur ses joues.",
+   "Elle repensa aux étés passés dans le jardin, aux histoires racontées le soir, à cette voix qu'elle n'entendrait plus jamais.",
+   "« Je suis désolée… je n'ai pas eu le temps de te dire au revoir. »",
+   "Personne ne répondit. Dehors, la pluie tombait doucement sur les tuiles, et le vide qu'elle laissait semblait immense."
+  ]
+ },
+ {
+  "expect": "calme",
+  "paras": [
+   "Le matin se levait lentement sur le lac. Une brise tiède faisait onduler les roseaux, et quelques oiseaux chantaient au loin.",
+   "Milo prépara deux tasses de thé et s'installa sur le perron. Le soleil réchauffait doucement les planches de bois.",
+   "Il n'y avait rien à faire aujourd'hui, et c'était parfait. Il ouvrit un livre et laissa le temps passer."
+  ]
+ },
+ {
+  "expect": "tension",
+  "paras": [
+   "Un bruit. Quelque part dans le couloir.",
+   "Nora retint son souffle. Le cœur battant, elle tendit l'oreille, immobile derrière la porte.",
+   "Les pas se rapprochaient, lents, prudents. Une ombre passa sous la porte. Elle serra le manche du couteau, la sueur au front.",
+   "Puis plus rien. Le silence était pire que tout."
+  ]
+ },
+ {
+  "expect": "romantique",
+  "paras": [
+   "Sous les lanternes du festival, Lio n'osait pas la regarder. Maëlle rougit quand leurs mains se frôlèrent.",
+   "« Tu sais… je suis content que tu sois venue », murmura-t-il.",
+   "Elle sourit tendrement et posa la tête contre son épaule. Son cœur battait si fort qu'il avait peur qu'elle l'entende."
+  ]
+ },
+ {
+  "expect": "joyeux",
+  "paras": [
+   "Les rires éclatèrent autour de la table. Pip venait encore de renverser la soupe sur le chapeau du capitaine.",
+   "« C'était un accident, je vous jure ! » s'écria-t-il, ce qui fit redoubler l'hilarité générale.",
+   "Même le vieux cuisinier riait aux larmes. Pour la première fois depuis des semaines, tout le monde était heureux."
+  ]
+ },
+ {
+  "expect": "effrayant",
+  "paras": [
+   "La porte de la cave grinça. Une odeur putride monta des ténèbres.",
+   "En bas, sur le sol de pierre, gisaient des ossements. Des dizaines. Et au fond, quelque chose bougeait.",
+   "Un rire dément résonna dans l'obscurité, puis une silhouette difforme se redressa lentement, ses yeux luisant comme des braises."
+  ]
+ },
+ {
+  "expect": "action",
+  "paras": [
+   "Il tomba à genoux, le visage couvert de sang. La douleur était insupportable.",
+   "« Ce n'est pas fini ! » rugit-il en se relevant.",
+   "D'un coup de poing, il envoya son adversaire au sol, esquiva la lame suivante et riposta. Les coups pleuvaient. Il n'avait plus peur de mourir."
+  ]
+ },
+ {
+  "expect": "triste",
+  "paras": [
+   "Le train s'éloigna. Elle resta seule sur le quai, sa valise à la main, regardant les dernières lumières disparaître.",
+   "Il ne reviendrait pas. Elle le savait depuis le début, mais l'entendre avait brisé quelque chose en elle.",
+   "Elle s'assit sur un banc et pleura en silence, longtemps, jusqu'à ce que le chef de gare vienne lui dire que la gare fermait."
+  ]
+ },
+ {
+  "expect": "action",
+  "paras": [
+   "La lame s'enfonça dans son flanc. Kael tituba en arrière, la vue brouillée…",
+   "Je vais mourir… Encore une fois… Pardon, Nora… je n'ai pas réussi à te protéger…",
+   "Le sang… il y en avait partout… Ses jambes tremblaient… Il avait si froid…",
+   "Non… Pas encore… Pas comme ça…",
+   "« Rrraaah ! » Il hurla, se jeta en avant et frappa l'homme au visage. L'autre recula sous le choc, Kael enchaîna, coup après coup, sans s'arrêter.",
+   "Le masque se brisa. L'ennemi s'effondra. Kael resta debout, haletant, l'épée à la main."
+  ]
+ },
+ {
+  "expect": "action",
+  "paras": [
+   "« Kael, derrière toi ! »",
+   "Trop tard. Le fouet de vent lui arracha le bras dans une gerbe de sang. La douleur explosa, blanche, totale.",
+   "« Gaaah… ! »",
+   "Il roula au sol, se releva à moitié, esquiva le deuxième coup par pur réflexe. La bête bondit. Les crocs claquèrent à quelques centimètres de son visage.",
+   "« Va-t'en… ! Cours… ! » souffla-t-il. Mais elle ne partit pas. Elle leva la main et la glace jaillit, transperçant le monstre de part en part."
+  ]
+ },
+ {
+  "expect": "triste",
+  "paras": [
+   "Après la bataille, le silence retomba sur le champ.",
+   "Nora s'agenouilla près du corps de Pip. Il souriait encore, comme s'il dormait…",
+   "« Tu avais promis… Tu avais promis qu'on rentrerait ensemble… »",
+   "Sa voix se brisa. Elle serra contre elle le petit chapeau tâché de terre et pleura, longtemps, pendant que le vent emportait la fumée."
+  ]
+ }
+]

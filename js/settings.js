@@ -33,6 +33,7 @@ export const DEFAULTS = {
   align: 'left',         // left | justify
   paraSpacing: 1,        // em
   indent: false,
+  moodTheme: true,       // teinte de fond selon l'ambiance
 
   engine: 'browser',     // browser | openai | elevenlabs
   voiceURI: '',
@@ -57,7 +58,8 @@ export const DEFAULTS = {
   scrollAnchor: 0.38,    // position de la ligne lue dans l'écran (0 = haut)
   autoNext: true,        // enchaîne sur le chapitre suivant
   prefetchNext: true,    // précharge le chapitre suivant pendant la lecture
-  readTitle: true,       // lit le titre du chapitre avant le texte
+  readTitle: true,
+  showRecap: true,       // récap « Précédemment… »       // lit le titre du chapitre avant le texte
   keepAwake: true,       // garde l'écran allumé pendant la lecture
   downloadImages: true,
 

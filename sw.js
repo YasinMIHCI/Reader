@@ -1,5 +1,5 @@
 // Service worker : l'application fonctionne hors ligne (les chapitres sont dans IndexedDB).
-const VERSION = 'relecteur-v4';
+const VERSION = 'relecteur-v5';
 const SHELL = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const SHELL = [
   './js/cast.js',
   './js/hybrid.js',
   './js/series.js',
+  './js/recap.js',
   './vendor/Readability.js',
   './manifest.webmanifest',
   './icons/icon.svg',

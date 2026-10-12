@@ -35,13 +35,15 @@ export const MOOD_FALLBACK = {
 
 // Racines (sans accents, en minuscules). Poids 1 par défaut, "racine:2" pour un poids plus fort.
 const LEXICON = {
-  triste: `larme pleur sanglot chagrin tristesse triste deuil funer tombe:0.5 mourir:0.6 mourut:0.6 meurt:0.6 adieu regret solitude seule:0.6 seul:0.4
-    perdu:0.5 perte souffr:0.7 douleur:0.6 brise:0.6 pardon:0.6 desole vide:0.5 absence manque:0.5 cercueil enterr defunt orphelin abandonn melancol
-    gemi:0.8 lugubre desespoir:2 desesper:2 inconsolable sanglota:2 pleura:2 sanglotait:2 pleurait:2 souvenir:0.4 jamais_plus:0.8 trop_tard:1.2
+  triste: `larme pleur sanglot chagrin tristesse triste deuil funer =tombe:0.5 =tombeau:0.8 =mourir:0.4 adieu regret solitude =seule:0.5 =seul:0.3
+    =perdu:0.3 =perte:0.4 =souffrance:0.4 brise_le_coeur:1.5 coeur_brise:1.5 =pardon:0.5 desole =vide:0.3 absence =manque:0.4 cercueil enterr defunt orphelin abandonn melancol
+    lugubre desespoir:2 desesper:2 inconsolable sanglota:2 pleura:2 sanglotait:2 pleurait:2 =souvenirs:0.4 jamais_plus:0.8 trop_tard:1.2 au_revoir:0.8 ne_reviendrait:1.5 se_brisa:1.2 =promis:0.6 agenouill:0.5 apres_la_bataille:1.5 =corps_sans_vie:2 sans_vie:1.2 ne_respirait_plus:2 =disparu:0.5 serra_contre:0.8 =regrets:0.8
     tear cried crying sobb grief sorrow mourn funeral lonely sadness regret`,
-  action: `epee lame:0.8 coup:0.7 frapp attaqu combat bataille explos bless sang:0.6 esquiv bondi saut:0.6 courut courir:0.6 poing charge:0.6 griffe crocs
-    ennemi arme:0.8 fleche tir:0.5 magie:0.6 sortilege incant flamm:0.8 eclair:0.6 foudre fracas impact transperc trancha tranch riposte parer:0.8
-    bouclier armure guerrier duel choc:0.8 s'elanc elanca projet:0.4 percut ecras:0.8 abatt:0.8 fonca fonce:0.6 hache massue mordit
+  action: `epee =lame:0.8 =lames:0.8 coup:0.7 frapp attaqu =combat:0.8 =bataille:0.5 explos bless sang:0.6 esquiv bondi =saut:0.6 sauta courut =courir:0.6 poing =charge:0.6 chargea griffe crocs
+    ennemi =arme:0.8 =armes:0.8 fleche magie:0.6 sortilege incant flamm:0.8 eclair:0.6 foudre fracas impact transperc trancha tranch riposte =para:0.6 =parer:0.8
+    bouclier armure guerrier duel choc:0.8 s'elanc elanca percut ecras:0.8 abatt:0.8 fonca =fonce:0.6 hache massue mordit dagu poignard couteau:0.6 fouet:0.6
+    hurla:0.8 rugi:0.8 pivota:0.8 feinta recula:0.6 tituba:0.6 projeta:0.8 dechir:0.8 jaillit:0.6 gerbe:0.6 claqu:0.5 =tomba:0.4 =tomber:0.3 halet:0.6 adversaire:1 assaut
+    =douleur:0.3 souffle_court:1 coup_apres_coup:1.5
     sword strike attack fight battle blood dodge punch explosion slash blade enemy`,
   romantique: `amour:1.5 aimait aimer:0.8 baiser:1.5 embrass:1.5 levres:1.2 rougi:1.5 rougeur rougissant tendre:0.8 tendresse:1.5 caress etreint:1.2 enlac:1.5
     main_dans_la_main:2 joue:0.5 belle:0.5 beaute:0.6 charm:0.6 desir:0.8 epous:0.8 mariage:0.8 rendez-vous_timide:0.8 doucement:0.3 coeur_battait:1.2
@@ -67,6 +69,9 @@ const LEXICON = {
     hero destiny vow victory courage`,
 };
 
+// Douleur physique, mort, chute : tristes dans le calme, mais signes d'action en plein combat
+const PAIN = /\b(douleur|sang|mourir|mort|blessure|souffr|brise|bris|tomb|perdu|vide|seul|gemi)/;
+
 function strip(s) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`]/g, "'");
 }
@@ -74,8 +79,10 @@ function strip(s) {
 const COMPILED = Object.entries(LEXICON).map(([mood, src]) => {
   const single = []; const phrases = [];
   src.trim().split(/\s+/).forEach(tok => {
-    const [term, wt] = tok.split(':');
-    const entry = { t: term.replace(/_/g, ' '), w: wt ? parseFloat(wt) : 1 };
+    const [raw, wt] = tok.split(':');
+    const exact = raw.startsWith('=');
+    const term = exact ? raw.slice(1) : raw;
+    const entry = { t: term.replace(/_/g, ' '), w: wt ? parseFloat(wt) : 1, exact };
     (term.includes('_') ? phrases : single).push(entry);
   });
   return { mood, single, phrases };
@@ -91,7 +98,7 @@ export function scoreText(text) {
     let sc = 0;
     for (const w of words) {
       for (const s of c.single) {
-        if (s.t.length <= 3 ? w === s.t : w.startsWith(s.t)) { sc += s.w; break; }
+        if (s.exact || s.t.length <= 3 ? w === s.t : w.startsWith(s.t)) { sc += s.w; break; }
       }
     }
     for (const ph of c.phrases) {
@@ -103,10 +110,23 @@ export function scoreText(text) {
   const excl = (text.match(/!/g) || []).length;
   const ell = (text.match(/…|\.\.\./g) || []).length;
   const q = (text.match(/\?/g) || []).length;
-  scores.action += Math.min(excl, 4) * 0.25;
-  scores.tension += Math.min(excl, 4) * 0.2;
-  scores.triste += Math.min(ell, 4) * 0.2;
-  scores.mystere += Math.min(q, 4) * 0.15 + Math.min(ell, 4) * 0.1;
+  // Rythme : phrases courtes + exclamations + onomatopées = action
+  const sentences = text.split(/[.!?…]+/).map(x => x.trim()).filter(Boolean);
+  const avgLen = sentences.length ? sentences.reduce((n, x) => n + x.length, 0) / sentences.length : 99;
+  const shout = (text.match(/\b[A-ZÀ-Ý]{3,}\b|([a-zA-Z])\1{2,}h?\b/g) || []).length; // « RAAAH », « Gaaah »
+  // (le rythme ne compte que s'il y a déjà des signes d'action : un dialogue calme est souvent fait de phrases courtes)
+  const lexicalAction = scores.action;
+  scores.action += Math.min(excl, 4) * 0.3 + Math.min(shout, 3) * 0.5;
+  if (avgLen < 45 && sentences.length >= 2 && (lexicalAction >= 0.8 || excl >= 2)) scores.action += 0.4;
+  scores.tension += Math.min(excl, 4) * 0.15;
+  scores.triste += Math.min(ell, 3) * 0.12;
+  scores.mystere += Math.min(q, 4) * 0.12 + Math.min(ell, 3) * 0.06;
+  // En plein combat, la douleur et la mort ne sont pas de la tristesse
+  if (scores.action >= 1.5 && PAIN.test(t)) {
+    const moved = scores.triste * 0.6;
+    scores.triste -= moved;
+    scores.action += moved * 0.5;
+  }
   return { scores, words: words.length };
 }
 
@@ -128,10 +148,10 @@ export function analyzeChapter(blocks) {
     const acc = {};
     MOODS.forEach(m => { acc[m.id] = 0; });
     let words = 0;
-    // fenêtre : 3 blocs avant, 5 après (la musique anticipe un peu), dans la même scène
-    for (let k = i - 3; k <= i + 5; k++) {
+    // fenêtre : 3 blocs avant, 2 après (légère anticipation), dans la même scène
+    for (let k = i - 3; k <= i + 2; k++) {
       if (k < 0 || k >= n || !per[k] || sceneOf[k] !== sceneOf[i]) continue;
-      const w = k === i ? 1.5 : k > i ? 1 : 0.7;
+      const w = k === i ? 1.6 : k > i ? 0.7 : 0.8;
       MOODS.forEach(m => { acc[m.id] += per[k].scores[m.id] * w; });
       words += per[k].words;
     }
@@ -142,6 +162,11 @@ export function analyzeChapter(blocks) {
       const v = acc[m.id] * norm;
       if (v > bestV) { bestV = v; best = m.id; }
     });
+    // les scènes intenses priment quand c'est serré (un combat avec un moment de désespoir reste un combat)
+    if (['triste', 'calme', 'romantique', 'mystere'].includes(best)) {
+      const intense = ['action', 'tension', 'effrayant'].map(id => [id, acc[id] * norm]).sort((a, b) => b[1] - a[1])[0];
+      if (intense[1] >= bestV * 0.75 && intense[1] >= 1.6) { best = intense[0]; bestV = intense[1]; }
+    }
     raw[i] = bestV >= 1.6 ? best : null;
   }
   // propagation : les blocs neutres prennent l'ambiance précédente de la scène (sinon "calme")
